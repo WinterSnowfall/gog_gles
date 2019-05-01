@@ -1,0 +1,7 @@
+#Linux (Python 3.6+)
+python3-html2text python3-numpy python3-requests python3-lxml
+
+#Windows (WinPython 3.6+ Zero)
+pip install html2text
+pip install requests
+pip install lxml
