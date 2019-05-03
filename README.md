@@ -28,7 +28,7 @@ sudo apt-get install python3-html2text python3-numpy python3-requests python3-lx
 cd scripts
 ```
 
-**4.** Create the Visor database, along with the appropriat tables and other artifacts by running:
+**4.** Create the Visor database, along with the appropriate tables and other artifacts, by running:
 ```
 python3 gog_create_db.py
 ```
@@ -73,4 +73,3 @@ You can now run the provided SQL queries against the *gog_visor.db* file to list
 ## Disclaimer
 
 I'm sure some may disagree with my style of coding or the lack of OOPness in my code. That's fair enough. Just FYI, I did not write these scripts with the intention of sharing them with anyone in particular (at least not initially), so you'll be bearing the full brunt of what I deemed was the most easily maintainable and hackable code I could write. Feel free to improve it as you see fit.
-
