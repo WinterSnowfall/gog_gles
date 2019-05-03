@@ -3,7 +3,7 @@ A collection of scripts that call publicly available GOG APIs in order to keep t
 
 ## What does Visor do?
 
-It provides several python3 scripts which call publicly available GOG APIs in order to collect company and game data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to developer/publisher entries, game cards, changelogs and installers/files.
+It provides several python3 scripts which call publicly available GOG APIs in order to collect product data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to developer/publisher entries, game cards, changelogs and installers/files.
 
 ## What do I need to do to get it running on my PC?
 
@@ -28,7 +28,7 @@ sudo apt-get install python3-html2text python3-numpy python3-requests python3-lx
 cd scripts
 ```
 
-**4.** Create the Visor database, along with the appropriate tables and other artifacts, by running:
+**4.** Create the Visor SQLite database, along with the appropriate tables and other artifacts, by running:
 ```
 python3 gog_create_db.py
 ```
@@ -40,7 +40,7 @@ The database will be created in the *output_db* folder.
 python3 gog_company_scan.py -f
 ```
 
-**6.** Do an initial manual run to populate the Visor database with known game ids (these are listed in the /conf/gog_products_scan.conf file, and will be updated monthly with the latest values):
+**6.** Do an initial manual run to populate the Visor database with known game ids (these are listed in the */conf/gog_products_scan.conf* file, and will be updated monthly with the latest values):
 ```
 python3 gog_products_scan.py -m
 ```
@@ -68,7 +68,7 @@ gog_updates.bat - for Windows
 
 Wait for the script to finish collecting all the required data.
 
-You can now run the provided SQL queries against the *gog_visor.db* file to list the updates. The queries are include in the sql script file (*sql\gog_updates.sql*). Any SQLite client can be used to this purpose. I personally recommend getting **DB Browser for SQLite**: https://sqlitebrowser.org/.
+You can now run the provided SQL queries against the *gog_visor.db* file to list the updates. The queries are included in the sql script file (*sql\gog_updates.sql*). Any SQLite client can be used to this purpose. I personally recommend getting **DB Browser for SQLite**: https://sqlitebrowser.org/.
 
 ## Disclaimer
 
