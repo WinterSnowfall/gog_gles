@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.00
-@date: 29/04/2019
+@version: 1.10
+@date: 23/02/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,6 +13,7 @@ import sqlite3
 import numpy
 import requests
 import logging
+import argparse
 from logging.handlers import RotatingFileHandler
 from sys import argv
 from shutil import copy2
@@ -92,7 +93,6 @@ COMPANY_SELECT_FILTER_QUERY = ('SELECT gc_int_nr FROM gog_companies WHERE '
 
 INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
-GAMES_NEW_URL = 'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page=1&sort=date'
 GAMES_UPCOMING_URL = 'https://www.gog.com/games/ajax/filtered?availability=coming&mediaType=game&page=1&sort=date'
 ADALIA_MISSING_URL = 'https://gog.bigpizzapies.com/missingUrls.json'
 ADALIA_LEGACY_URL = 'https://gog.bigpizzapies.com/legacyUrls.json'
@@ -969,6 +969,19 @@ def gog_files_extract_parser(db_connection, product_id):
 
 ##main thread start
 
+#added support for optional command-line parameter mode switching
+parser = argparse.ArgumentParser(description='GOG products scan (part of gog_gles) - a script to call publicly available GOG APIs \
+                                              in order to retrieve product information and updates.')
+
+group = parser.add_mutually_exclusive_group()
+group.add_argument('-n', '--new', help='Query new products', action='store_true')
+group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
+group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
+group.add_argument('-t', '--third_party', help='Perform a third-party (adalia fundamentals) products scan', action='store_true')
+group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
+
+args = parser.parse_args()
+
 logger.info('*** Running PRODUCTS scan script ***')
 
 #db file check/backup section
@@ -999,25 +1012,20 @@ except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise Exception()
 
-#added support for optional command-line parameter mode switching
-try:
-    parameter =  argv[1]
+#detect any parameter overrides and set the scan_mode accordingly
+if len(argv) > 1:
     logger.info('Command-line parameter mode override detected.')
     
-    if parameter == '-n':
+    if args.new:
         scan_mode = 'new'
-    elif parameter == '-u':
+    elif args.update:
         scan_mode = 'update'
-    elif parameter == '-m':
+    elif args.manual:
         scan_mode = 'manual'
-    elif parameter == '-t':
+    elif args.third_party:
         scan_mode = 'third_party'
-    elif parameter == '-e':
+    elif args.extract:
         scan_mode = 'extract'
-    else:
-        logger.error('Invalid command-line parameter option! Mode switch will be ignored!')
-except IndexError:
-    pass
         
 if scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
@@ -1091,11 +1099,13 @@ elif scan_mode == 'new':
     
     try:
         with requests.Session() as session:
-            with sqlite3.connect(db_file_full_path) as db_connection:
+            #new games will always number 50 entries and will be split across 2 pages in the ajax call
+            for page_no in range(1, 3):
+                games_new_url = f'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page={page_no}&sort=date'
                 #parse new ids from the games page ajax call
-                gog_product_games_ajax_query(GAMES_NEW_URL, scan_mode, session, db_connection)
-                #parse upcoming ids from the games page ajax call
-                gog_product_games_ajax_query(GAMES_UPCOMING_URL, scan_mode, session, db_connection)
+                gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
+            #parse upcoming ids from the games page ajax call
+            gog_product_games_ajax_query(GAMES_UPCOMING_URL, scan_mode, session, db_connection)
             
     except KeyboardInterrupt:
         pass

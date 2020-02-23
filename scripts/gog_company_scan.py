@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.00
-@date: 29/04/2019
+@version: 1.10
+@date: 23/02/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -12,6 +12,7 @@ import html
 import sqlite3
 import requests
 import logging
+import argparse
 from logging.handlers import RotatingFileHandler
 from sys import argv
 from shutil import copy2
@@ -159,6 +160,16 @@ def gog_company_query(scan_mode):
 
 ##main thread start
 
+#added support for optional command-line parameter mode switching
+parser = argparse.ArgumentParser(description='GOG company scan (part of gog_gles) - a script to call publicly available GOG APIs \
+                                              in order to retrieve company information.')
+
+group = parser.add_mutually_exclusive_group()
+group.add_argument('-f', '--full', help='Perform a full company scan', action='store_true')
+group.add_argument('-u', '--update', help='Perform an update company scan', action='store_true')
+
+args = parser.parse_args()
+
 logger.info('*** Running COMPANY scan script ***')
     
 #db file check/backup section
@@ -189,19 +200,14 @@ except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise Exception()
     
-#added support for optional command-line parameter mode switching
-try:
-    parameter =  argv[1]
+#detect any parameter overrides and set the scan_mode accordingly
+if len(argv) > 1:
     logger.info('Command-line parameter mode override detected.')
     
-    if parameter == '-f':
+    if args.full:
         scan_mode = 'full'
-    elif parameter == '-u':
+    elif args.update:
         scan_mode = 'update'
-    else:
-        logger.error('Invalid command-line parameter option! Mode switch will be ignored!')
-except IndexError:
-    pass
 
 if scan_mode == 'full':
     logger.info('--- Running in FULL scan mode ---')

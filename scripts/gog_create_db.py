@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.00
-@date: 29/04/2019
+@version: 1.10
+@date: 23/02/2020
 
 Warning: Built for use with python 3.6+
 '''
 
 import sqlite3
 import logging
+import argparse
 from logging.handlers import RotatingFileHandler
 from os import path
 
@@ -87,6 +88,12 @@ CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files(gf_int_nr INTEGER PRIMARY KEY 
                             'gf_file_downlink TEXT NOT NULL)')
 
 ##main thread start
+
+#added support for optional command-line parameter mode switching
+parser = argparse.ArgumentParser(description='GOG DB create (part of gog_visor) - a script to create the sqlite DB structure \
+                                              for the other gog_visor utilities.')
+
+args = parser.parse_args()
 
 #db file check/creation section
 if not path.exists(db_file_full_path):
