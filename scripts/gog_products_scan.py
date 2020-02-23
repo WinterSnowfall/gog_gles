@@ -1099,13 +1099,14 @@ elif scan_mode == 'new':
     
     try:
         with requests.Session() as session:
-            #new games will always number 50 entries and will be split across 2 pages in the ajax call
-            for page_no in range(1, 3):
-                games_new_url = f'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page={page_no}&sort=date'
-                #parse new ids from the games page ajax call
-                gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
-            #parse upcoming ids from the games page ajax call
-            gog_product_games_ajax_query(GAMES_UPCOMING_URL, scan_mode, session, db_connection)
+            with sqlite3.connect(db_file_full_path) as db_connection:
+                #new games will always number 50 entries and will be split across 2 pages in the ajax call
+                for page_no in range(1, 3):
+                    games_new_url = f'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page={page_no}&sort=date'
+                    #parse new ids from the games page ajax call
+                    gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
+                #parse upcoming ids from the games page ajax call
+                gog_product_games_ajax_query(GAMES_UPCOMING_URL, scan_mode, session, db_connection)
             
     except KeyboardInterrupt:
         pass
