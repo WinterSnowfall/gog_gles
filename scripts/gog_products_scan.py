@@ -970,14 +970,14 @@ def gog_files_extract_parser(db_connection, product_id):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG products scan (part of gog_gles) - a script to call publicly available GOG APIs \
+parser = argparse.ArgumentParser(description='GOG products scan (part of gog_visor) - a script to call publicly available GOG APIs \
                                               in order to retrieve product information and updates.')
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-n', '--new', help='Query new products', action='store_true')
 group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
 group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
-group.add_argument('-t', '--third_party', help='Perform a third-party (adalia fundamentals) products scan', action='store_true')
+group.add_argument('-t', '--third_party', help='Perform a third-party (Adalia Fundamentals) products scan', action='store_true')
 group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
 
 args = parser.parse_args()

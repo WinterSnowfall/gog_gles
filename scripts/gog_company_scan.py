@@ -161,7 +161,7 @@ def gog_company_query(scan_mode):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG company scan (part of gog_gles) - a script to call publicly available GOG APIs \
+parser = argparse.ArgumentParser(description='GOG company scan (part of gog_visor) - a script to call publicly available GOG APIs \
                                               in order to retrieve company information.')
 
 group = parser.add_mutually_exclusive_group()
