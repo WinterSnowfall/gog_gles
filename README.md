@@ -9,18 +9,20 @@ It provides several python3 scripts which call publicly available GOG APIs in or
 
 **1.** You will need a **python3.6+** environment - I recommend getting **WinPython** if you're running the scripts on Windows: https://winpython.github.io/. Most Linux distros will come with python3 installed - make sure you pick one which comes with **python 3.6** or above.
 
-**2.** The following python3 packages need to be installed: `html2text, numpy, requests, lxml`
+**2.** The following python3 packages need to be installed: `html2text, numpy, requests, lxml, matplotlib, tk`
 
 On WinPython (Zero) you can get them by opening an admin console and using the following commands (numpy is already installed):
 ```
 pip install html2text
 pip install requests
 pip install lxml
+pip install matplotlib
+pip install tk
 ```
 
 On Linux, you will need to install the packages using the distro's default package manager. For Debian-based/derived distros, this should do the trick:
 ```
-sudo apt-get install python3-html2text python3-numpy python3-requests python3-lxml
+sudo apt-get install python3-html2text python3-numpy python3-requests python3-lxml python3-matplotlib python3-tk
 ```
 
 **3.** Switch to the scripts directory:
