@@ -1,3 +1,5 @@
+#!/bin/bash
+
 cd scripts
 
 python3 gog_company_scan.py -f
