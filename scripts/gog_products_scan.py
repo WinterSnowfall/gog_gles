@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.10
-@date: 23/02/2020
+@version: 1.20
+@date: 08/03/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -93,7 +93,6 @@ COMPANY_SELECT_FILTER_QUERY = ('SELECT gc_int_nr FROM gog_companies WHERE '
 
 INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
-GAMES_UPCOMING_URL = 'https://www.gog.com/games/ajax/filtered?availability=coming&mediaType=game&page=1&sort=date'
 ADALIA_MISSING_URL = 'https://gog.bigpizzapies.com/missingUrls.json'
 ADALIA_LEGACY_URL = 'https://gog.bigpizzapies.com/legacyUrls.json'
 
@@ -726,6 +725,9 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
     
     logger.info(f'GQ >>> Querying url: {url}')
     
+    #return a value of 1, should something go terribly wrong
+    totalPages = 1
+    
     try:
         #reuse session connection(s) to send a GET request
         response = session.get(url, cookies=COOKIES, timeout=300)
@@ -734,6 +736,10 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
         
         if response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') == -1:
             gogData_json = json.loads(response.text, object_pairs_hook=OrderedDict)
+            
+            #return the total number of pages, as listed in the response
+            totalPages = gogData_json['totalPages']
+            logger.debug(f'GQ >>> Total pages: {totalPages}')
                         
             #use a set to avoid processing potentially duplicate ids
             id_set = set()
@@ -780,6 +786,8 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
         else:
             logger.error(f'GQ >>> HTTP error code received: {response.status_code}.')
             raise Exception()
+        
+        return totalPages
                 
     except:
         logger.error('GQ >>> Processing has failed!')
@@ -1100,13 +1108,25 @@ elif scan_mode == 'new':
     try:
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                #new games will always number 50 entries and will be split across 2 pages in the ajax call
-                for page_no in range(1, 3):
+                page_no = 1
+                #start off as 1, then use whatever is returned by the ajax call
+                games_new_url_page_count = 1
+                #new games may number above 50 entries and can be split across 2+ pages in the ajax call
+                while page_no <= games_new_url_page_count:
                     games_new_url = f'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page={page_no}&sort=date'
                     #parse new ids from the games page ajax call
-                    gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
-                #parse upcoming ids from the games page ajax call
-                gog_product_games_ajax_query(GAMES_UPCOMING_URL, scan_mode, session, db_connection)
+                    games_new_url_page_count = gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
+                    page_no += 1
+                
+                page_no = 1
+                #start off as 1, then use whatever is returned by the ajax call
+                games_upcoming_url_page_count = 1
+                #upcoming games may number above 50 entries and can be split across 2+ pages in the ajax call
+                while page_no <= games_upcoming_url_page_count:
+                    games_upcoming_url = f'https://www.gog.com/games/ajax/filtered?availability=coming&mediaType=game&page={page_no}&sort=date'
+                    #parse new ids from the games page ajax call
+                    games_upcoming_url_page_count = gog_product_games_ajax_query(games_upcoming_url, scan_mode, session, db_connection)
+                    page_no += 1
             
     except KeyboardInterrupt:
         pass
