@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.10
-@date: 23/02/2020
+@version: 1.30
+@date: 23/03/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -58,7 +58,7 @@ def gog_company_query(scan_mode):
             
             logger.debug(f'CQ >>> HTTP response code is: {response.status_code}')
             
-            if response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') == -1:
+            if response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') == -1:
                 logger.info('CQ >>> Company query has returned a valid response...')
                 
                 html_tree = lhtml.fromstring(response.text)
@@ -88,7 +88,7 @@ def gog_company_query(scan_mode):
                                 company_name = html.unescape(company_raw_name)
                                 logger.debug(f'CQ >>> company_name value: {company_name}')
                                 #workaround for a miss-match on 'Lion's Shade' caused by a leaning quote ('`') character
-                                if(company_name.find('`') != -1):
+                                if company_name.find('`') != -1:
                                     company_name = company_name.replace('`', "'")
                                 #set this to debug in order to highlight new companies only
                                 logger.debug(f'CQ >>> Processing company: {company_name}')
@@ -139,12 +139,12 @@ def gog_company_query(scan_mode):
                                 else:
                                     logger.debug(f'CQ >>> Company {company} is already de-listed. Skipping.')
 
-            elif response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') != -1:
+            elif response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') != -1:
                 logger.error('CQ >>> Non-HTTP server-side exception returned. Aborting!')
                 raise Exception()
             
             #this should not happen (ever)
-            elif response.status_code == 200 and response.text == None:
+            elif response.status_code == 200 and response.text is None:
                 logger.error('CQ >>> Received a null HTTP response text. Aborting!')
                 raise Exception()
             

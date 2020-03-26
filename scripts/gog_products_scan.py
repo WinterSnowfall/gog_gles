@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.20
-@date: 08/03/2020
+@version: 1.30
+@date: 23/03/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -352,7 +352,7 @@ def gog_process_json_payload(json_payload):
     #and remove any trailing or leading whitespace
     array_index = 0
     for item in values_pretty:
-        if item != None:
+        if item is not None:
             if item == 'null' or item.strip() == '' or item.strip() == '""' or item.strip() == "''":
                 item = None
             else:
@@ -366,7 +366,7 @@ def gog_process_json_payload(json_payload):
 
 def gog_product_company_query(product_id, product_url, scan_mode, session):
     #convert to https, as some product_card urls can be http-based
-    if(product_url.find('http://') != -1):
+    if product_url.find('http://') != -1:
         product_url = product_url.replace('http://', 'https://')
     
     try:
@@ -374,7 +374,7 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
         
         logger.debug(f'CQ >>> HTTP response code: {response.status_code}')
         
-        if response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') == -1:
+        if response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') == -1:
             logger.debug(f'CQ >>> HTTP response URL: {response.url}')
             
             #check if the response URL remained identical to with the provided product URL
@@ -415,12 +415,12 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
                     logger.warning('CQ >>> Product URL has been redirected to the GOG games page. Perhaps the product is no longer being sold?')
                 return(None, None)
             
-        elif response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') != -1:
+        elif response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') != -1:
             logger.error('CQ >>> Non-HTTP server-side exception received.')
             raise Exception()
         
         #this should not happen (ever)
-        elif response.status_code == 200 and response.text == None:
+        elif response.status_code == 200 and response.text is None:
             logger.error('CQ >>> Received a null HTTP response text.')
             raise Exception()
         
@@ -442,7 +442,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             
         logger.debug(f'PQ >>> HTTP response code: {response.status_code}')
             
-        if response.status_code == 200 and response.text != None and response.text != '[]' and response.text.find('"error": "server_error"') == -1:
+        if response.status_code == 200 and response.text is not None and response.text != '[]' and response.text.find('"error": "server_error"') == -1:
             if scan_mode == 'manual':
                 logger.info(f'PQ >>> Product query for id {product_id} has returned a valid response...')
             
@@ -484,14 +484,21 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     [21] - changelog
                 '''
                 
-                #to be used for all loggers
-                product_title = values_pretty[1]
+                #if the API returned product title starts with 'product_title_', keep the existing product title
+                if values_pretty[1] is not None and values_pretty[1].startswith('product_title_'):
+                    logger.warning('PQ >>> Product title update skipped since an invalid value was returned!')
+                    cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+                    #to be used for all loggers
+                    product_title = cursor.fetchone()[0]
+                else:
+                    #to be used for all loggers
+                    product_title = values_pretty[1]
                 
                 ##movie detection logic
                 
                 #detect if the entry is a movie based on the content of the lead description field
                 #I know, not very pretty, but hey, it works
-                if(values_pretty[18] != None):
+                if values_pretty[18] is not None:
                     if(values_pretty[18].startswith('IMDB rating:') or
                        values_pretty[18].startswith('Duration:') or
                        #fix for Super Game Jam - technically a movie though it provides some games as bonus
@@ -510,7 +517,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 
                 ##company query call
                 product_card = json_parsed['links']['product_card']
-                if product_card != None and product_card != '':
+                if product_card is not None and product_card != '':
                     developer, publisher = gog_product_company_query(product_id, product_card, scan_mode, session)
                 else:
                     if scan_mode == 'manual':
@@ -519,12 +526,12 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     publisher = None
                 
                 ##determine developer/publisher logic
-                if developer != None:
+                if developer is not None:
                     dev_pub_null = 'false'
                     
                     cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [developer, ])
                     developer_fk_array = cursor.fetchone()
-                    if developer_fk_array != None:
+                    if developer_fk_array is not None:
                         developer_fk = developer_fk_array[0]
                     else:
                         #also try to match the uppercase variant with some filtering of the developer 
@@ -534,7 +541,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                                         .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
                         developer_fk_array = cursor.fetchone()
                         
-                        if developer_fk_array != None:
+                        if developer_fk_array is not None:
                             developer_fk = developer_fk_array[0]
                         else:
                             logger.warning(f'PQ >>> Unable to link developer name to an existing DB company entry for {product_id}!')
@@ -542,12 +549,12 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 else:
                     developer_fk = None
                     
-                if publisher != None:
+                if publisher is not None:
                     dev_pub_null = 'false'
                     
                     cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [publisher, ])
                     publisher_fk_array = cursor.fetchone()
-                    if publisher_fk_array != None:
+                    if publisher_fk_array is not None:
                         publisher_fk = publisher_fk_array[0]
                     else:
                         #also try to match the uppercase variant with some filtering of the publisher 
@@ -557,7 +564,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                                         .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
                         publisher_fk_array = cursor.fetchone()
                         
-                        if publisher_fk_array != None:
+                        if publisher_fk_array is not None:
                             publisher_fk = publisher_fk_array[0]
                         else:
                             logger.warning(f'PQ >>> Unable to link publisher name to an existing DB company entry for {product_id}!')
@@ -616,7 +623,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     
                     if existing_full_json != json_pretty or existing_developer != developer or existing_publisher != publisher:
                         if existing_developer != developer or existing_publisher != publisher:
-                            if developer != None and publisher != None and developer != '' and publisher != '':
+                            if developer is not None and publisher is not None and developer != '' and publisher != '':
                                 logger.info(f'PQ >>> Developer/publisher is out of date for {product_id}. Updating...')
                                 cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, gp_int_dev_pub_null = ? WHERE gp_id = ?', 
                                                [developer, publisher, developer_fk, publisher_fk, dev_pub_null, int(product_id)])
@@ -657,7 +664,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             
             cursor.close()
                 
-        elif scan_mode == 'update' and response.status_code == 200 and response.text != None and response.text == '[]':
+        elif scan_mode == 'update' and response.status_code == 200 and response.text is not None and response.text == '[]':
             logger.debug(f'PQ >>> Product with id {product_id} returned a blank list ("[]").')
             cursor = db_connection.cursor()
             #check to see the existing value for gp_int_no_longer_listed
@@ -665,7 +672,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             current_no_longer_listed = cursor.fetchone()[0]
             
             #only alter the entry of not already marked as no longer listed
-            if current_no_longer_listed == None:
+            if current_no_longer_listed is None:
                 logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
                 cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ?  WHERE gp_id = ?', [str(datetime.now()), int(product_id)])
                 db_connection.commit()
@@ -675,10 +682,10 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 cursor.close()
                 logger.info(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
         
-        elif scan_mode == 'manual' and response.status_code == 200 and response.text != None and response.text == '[]':
+        elif scan_mode == 'manual' and response.status_code == 200 and response.text is not None and response.text == '[]':
             logger.debug(f'PQ >>> Product with id {product_id} returned a blank list ("[]"). Skipping.')
             
-        elif response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') != -1:
+        elif response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') != -1:
             logger.error(f'PQ >>> Product with id {product_id} returned a Non-HTTP server-side exception')
             raise Exception()
                     
@@ -690,7 +697,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             current_no_longer_listed = cursor.fetchone()[0]
             
             #only alter the entry of not already marked as no longer listed
-            if current_no_longer_listed == None:
+            if current_no_longer_listed is None:
                 logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
                 cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', [str(datetime.now()), int(product_id)])
                 db_connection.commit()
@@ -708,7 +715,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             raise Exception()
         
         #this should not happen (ever)
-        elif response.status_code == 200 and response.text == None:
+        elif response.status_code == 200 and response.text is None:
             logger.error('PQ >>> Received a null HTTP response text.')
             raise Exception()
         
@@ -734,7 +741,7 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
         
         logger.debug(f'GQ >>> HTTP response code: {response.status_code}')
         
-        if response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') == -1:
+        if response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') == -1:
             gogData_json = json.loads(response.text, object_pairs_hook=OrderedDict)
             
             #return the total number of pages, as listed in the response
@@ -773,12 +780,12 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
                         #uncomment for debugging purposes only
                         #raise
         
-        elif response.status_code == 200 and response.text != None and response.text.find('"error": "server_error"') != -1:
+        elif response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') != -1:
             logger.error('GQ >>> Non-HTTP server-side exception received.')
             raise Exception()
             
         #this should not happen (ever)
-        elif response.status_code == 200 and response.text == None:
+        elif response.status_code == 200 and response.text is None:
             logger.error('GQ >>> Received a null HTTP response text.')
             raise Exception()
              
@@ -804,7 +811,7 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
             
         logger.debug(f'TQ >>> HTTP response code: {response.status_code}')
             
-        if response.status_code == 200 and response.text != None:
+        if response.status_code == 200 and response.text is not None:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
             cursor = db_connection.cursor()
             
@@ -812,12 +819,12 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
                 logger.debug(f'TQ >>> Picked up the following product id: {extra_id}')
                 
                 #at least one of the ids is null for some reason, so do check
-                if extra_id != None and extra_id != '':
+                if extra_id is not None and extra_id != '':
                     cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', [int(extra_id), ])
                     entry_count = cursor.fetchone()[0]
                     
                     #only run a product scan if a new id was detected
-                    if(entry_count == 0):
+                    if entry_count == 0:
                         logger.debug(f'TQ >>> Unknown id detected! Running scan for {extra_id}')
                         complete = False
                         retry_counter = 0
@@ -843,7 +850,7 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
             cursor.close()
         
         #this should not happen (ever)
-        elif response.status_code == 200 and response.text == None:
+        elif response.status_code == 200 and response.text is None:
             logger.error('TQ >>> Received a null HTTP response text. Aborting!')
             raise Exception()
                  
@@ -886,7 +893,7 @@ def gog_files_extract_parser(db_connection, product_id):
             installer_file_size = installer_file['size']
             installer_file_downlink = installer_file['downlink']
             
-            if installer_version != None:
+            if installer_version is not None:
                 db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? and gf_int_type = \'installer\' and gf_id = ? and gf_file_id = ? and gf_os = ? and gf_language = ? and gf_version = ? and gf_file_size = ?', 
                                [product_id, installer_id, installer_file_id, installer_os, installer_language, installer_version, installer_file_size])
             else:
@@ -936,7 +943,7 @@ def gog_files_extract_parser(db_connection, product_id):
             patch_file_size = patch_file['size']
             patch_file_downlink = patch_file['downlink']
                 
-            if patch_version != None:
+            if patch_version is not None:
                 db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? and gf_int_type = \'patch\' and gf_id = ? and gf_file_id = ? and gf_os = ? and gf_language = ? and gf_version = ? and gf_file_size = ?', 
                                [product_id, patch_id, patch_file_id, patch_os, patch_language, patch_version, patch_file_size])
             else:
