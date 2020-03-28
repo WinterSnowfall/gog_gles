@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.10
-@date: 23/02/2020
+@version: 1.40
+@date: 28/03/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -10,13 +10,13 @@ Warning: Built for use with python 3.6+
 import sqlite3
 import logging
 import argparse
-from logging.handlers import RotatingFileHandler
+from logging import FileHandler
 from os import path
 
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_create_db.log')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=33554432, backupCount=2, encoding='utf-8')
+logger_file_handler = FileHandler(log_file_full_path, mode='w', encoding='utf-8')
 logger_file_formatter = logging.Formatter(logger_format)
 logger_file_handler.setFormatter(logger_file_formatter)
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL

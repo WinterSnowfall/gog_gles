@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.30
-@date: 23/03/2020
+@version: 1.40
+@date: 28/03/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -36,7 +36,7 @@ conf_file_full_path = path.join('..', 'conf', 'gog_products_scan.conf')
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_products_scan.log')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=33554432, backupCount=2, encoding='utf-8')
+logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
 logger_file_formatter = logging.Formatter(logger_format)
 logger_file_handler.setFormatter(logger_file_formatter)
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -119,7 +119,7 @@ def gog_process_json_payload(json_payload):
         [7]  - in_development
         [8]  - is_secret
         [9]  - is_installable
-        [10]  - game_type
+        [10] - game_type
         [11] - is_pre_order
         [12] - release_date
         [13] - images
