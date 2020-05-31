@@ -456,121 +456,118 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', [int(product_id), ])
             entry_count = cursor.fetchone()[0]
             
-            #no need to do any advanced processing if an entry is found in 'manual' scan mode,
-            #since that entry will be skipped anyway
-            if not (entry_count == 1 and scan_mode == 'manual'):
-                '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
-                    [0]  - id
-                    [1]  - title
-                    [2]  - slug
-                    [3]  - cs_compat_windows
-                    [4]  - cs_compat_osx
-                    [5]  - cs_compat_linux
-                    [6]  - languages_processed
-                    [7]  - links_forum
-                    [8]  - links_product_card
-                    [9]  - links_purchase_link
-                    [10] - links_support
-                    [11] - in_development_active
-                    [12] - in_development_until
-                    [13] - is_secret
-                    [14] - is_installable
-                    [15] - game_type
-                    [16] - is_pre_order
-                    [17] - release_date
-                    [18] - description_lead
-                    [19] - description_full
-                    [20] - description_cool
-                    [21] - changelog
-                '''
-                
-                #if the API returned product title starts with 'product_title_', keep the existing product title
-                if values_pretty[1] is not None and values_pretty[1].startswith('product_title_'):
-                    logger.warning('PQ >>> Product title update skipped since an invalid value was returned!')
-                    cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', [int(product_id), ])
-                    #to be used for all loggers
-                    product_title = cursor.fetchone()[0]
-                else:
-                    #to be used for all loggers
-                    product_title = values_pretty[1]
-                
-                ##movie detection logic
-                
-                #detect if the entry is a movie based on the content of the lead description field
-                #I know, not very pretty, but hey, it works
-                if values_pretty[18] is not None:
-                    if(values_pretty[18].startswith('IMDB rating:') or
-                       values_pretty[18].startswith('Duration:') or
-                       #fix for Super Game Jam - technically a movie though it provides some games as bonus
-                       values_pretty[18].startswith('**Includes 5 short films & 5 short games.**') or
-                       #fix for Deliverance: The Making of Kingdom Come - may want to think of a more elegant way to do this
-                       values_pretty[18].startswith('Also available:')):
-                        is_movie = 'true'
-                    else:
-                        is_movie = 'false'
-                #when no description is provided, consider the entry a non-movie entry
+            '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
+                [0]  - id
+                [1]  - title
+                [2]  - slug
+                [3]  - cs_compat_windows
+                [4]  - cs_compat_osx
+                [5]  - cs_compat_linux
+                [6]  - languages_processed
+                [7]  - links_forum
+                [8]  - links_product_card
+                [9]  - links_purchase_link
+                [10] - links_support
+                [11] - in_development_active
+                [12] - in_development_until
+                [13] - is_secret
+                [14] - is_installable
+                [15] - game_type
+                [16] - is_pre_order
+                [17] - release_date
+                [18] - description_lead
+                [19] - description_full
+                [20] - description_cool
+                [21] - changelog
+            '''
+            
+            #if the API returned product title starts with 'product_title_', keep the existing product title
+            if values_pretty[1] is not None and values_pretty[1].startswith('product_title_'):
+                logger.warning('PQ >>> Product title update skipped since an invalid value was returned!')
+                cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+                #to be used for all loggers
+                values_pretty[1] = cursor.fetchone()[0]
+            
+            #to be used for all loggers
+            product_title = values_pretty[1]
+            
+            ##movie detection logic
+            
+            #detect if the entry is a movie based on the content of the lead description field
+            #I know, not very pretty, but hey, it works
+            if values_pretty[18] is not None:
+                if(values_pretty[18].startswith('IMDB rating:') or
+                   values_pretty[18].startswith('Duration:') or
+                   #fix for Super Game Jam - technically a movie though it provides some games as bonus
+                   values_pretty[18].startswith('**Includes 5 short films & 5 short games.**') or
+                   #fix for Deliverance: The Making of Kingdom Come - may want to think of a more elegant way to do this
+                   values_pretty[18].startswith('Also available:')):
+                    is_movie = 'true'
                 else:
                     is_movie = 'false'
-                        
-                #be a pessimist by default
-                dev_pub_null = 'true'
-                
-                ##company query call
-                product_card = json_parsed['links']['product_card']
-                if product_card is not None and product_card != '':
-                    developer, publisher = gog_product_company_query(product_id, product_card, scan_mode, session)
-                else:
-                    if scan_mode == 'manual':
-                        logger.warning('PQ >>> Product company query skipped since a null product card value was returned!')
-                    developer = None
-                    publisher = None
-                
-                ##determine developer/publisher logic
-                if developer is not None:
-                    dev_pub_null = 'false'
+            #when no description is provided, consider the entry a non-movie entry
+            else:
+                is_movie = 'false'
                     
-                    cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [developer, ])
+            #be a pessimist by default
+            dev_pub_null = 'true'
+            
+            ##company query call
+            product_card = json_parsed['links']['product_card']
+            if product_card is not None and product_card != '':
+                developer, publisher = gog_product_company_query(product_id, product_card, scan_mode, session)
+            else:
+                if scan_mode == 'manual':
+                    logger.warning('PQ >>> Product company query skipped since a null product card value was returned!')
+                developer = None
+                publisher = None
+            
+            ##determine developer/publisher logic
+            if developer is not None:
+                dev_pub_null = 'false'
+                
+                cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [developer, ])
+                developer_fk_array = cursor.fetchone()
+                if developer_fk_array is not None:
+                    developer_fk = developer_fk_array[0]
+                else:
+                    #also try to match the uppercase variant with some filtering of the developer 
+                    #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
+                    cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
+                                   [developer.upper().replace('.','').replace(':','')
+                                    .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
                     developer_fk_array = cursor.fetchone()
+                    
                     if developer_fk_array is not None:
                         developer_fk = developer_fk_array[0]
                     else:
-                        #also try to match the uppercase variant with some filtering of the developer 
-                        #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
-                        cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
-                                       [developer.upper().replace('.','').replace(':','')
-                                        .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
-                        developer_fk_array = cursor.fetchone()
-                        
-                        if developer_fk_array is not None:
-                            developer_fk = developer_fk_array[0]
-                        else:
-                            logger.warning(f'PQ >>> Unable to link developer name to an existing DB company entry for {product_id}!')
-                            developer_fk = None
+                        logger.warning(f'PQ >>> Unable to link developer name to an existing DB company entry for {product_id}!')
+                        developer_fk = None
+            else:
+                developer_fk = None
+                
+            if publisher is not None:
+                dev_pub_null = 'false'
+                
+                cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [publisher, ])
+                publisher_fk_array = cursor.fetchone()
+                if publisher_fk_array is not None:
+                    publisher_fk = publisher_fk_array[0]
                 else:
-                    developer_fk = None
-                    
-                if publisher is not None:
-                    dev_pub_null = 'false'
-                    
-                    cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [publisher, ])
+                    #also try to match the uppercase variant with some filtering of the publisher 
+                    #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
+                    cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
+                                   [publisher.upper().replace('.','').replace(':','')
+                                    .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
                     publisher_fk_array = cursor.fetchone()
+                    
                     if publisher_fk_array is not None:
                         publisher_fk = publisher_fk_array[0]
                     else:
-                        #also try to match the uppercase variant with some filtering of the publisher 
-                        #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
-                        cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
-                                       [publisher.upper().replace('.','').replace(':','')
-                                        .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
-                        publisher_fk_array = cursor.fetchone()
-                        
-                        if publisher_fk_array is not None:
-                            publisher_fk = publisher_fk_array[0]
-                        else:
-                            logger.warning(f'PQ >>> Unable to link publisher name to an existing DB company entry for {product_id}!')
-                            publisher_fk = None
-                else:
-                    publisher_fk = None
+                        logger.warning(f'PQ >>> Unable to link publisher name to an existing DB company entry for {product_id}!')
+                        publisher_fk = None
+            else:
+                publisher_fk = None
             
             if entry_count == 0:
                 #add custom db field values to the HTTP response list
@@ -609,58 +606,54 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}')
             
             elif entry_count == 1:
-                #do not update existing entries in a full scan, since update/delta scans will take care of that
-                if scan_mode == 'manual':
-                    logger.info(f'PQ >>> Found an existing db entry with id {product_id}. Skipping.')
-                else:
-                    cursor.execute('SELECT gp_int_dev_pub_null, gp_int_full_json_payload, gp_int_latest_update, gp_developer, gp_publisher FROM gog_products WHERE gp_id = ?', [int(product_id), ])
-                    query_result = cursor.fetchone()
-                    existing_dev_pub_null = query_result[0]
-                    existing_full_json = query_result[1]
-                    existing_update_timestamp = query_result[2]
-                    existing_developer = query_result[3]
-                    existing_publisher = query_result[4]
-                    
-                    if existing_full_json != json_pretty or existing_developer != developer or existing_publisher != publisher:
-                        if existing_developer != developer or existing_publisher != publisher:
-                            if developer is not None and publisher is not None and developer != '' and publisher != '':
-                                logger.info(f'PQ >>> Developer/publisher is out of date for {product_id}. Updating...')
-                                cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, gp_int_dev_pub_null = ? WHERE gp_id = ?', 
-                                               [developer, publisher, developer_fk, publisher_fk, dev_pub_null, int(product_id)])
-                                db_connection.commit()
-                                logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}')
-                            else:
-                                dev_pub_null = 'true'
-                                #only log warning and update if the developer/publisher null status has just changed from false to true
-                                if existing_dev_pub_null == 'false':
-                                    logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values!')
-                                    
-                                    cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ? WHERE gp_id = ?', 
-                                               [dev_pub_null, int(product_id)])
-                                    db_connection.commit()
-                                    logger.info(f'PQ ~~~ Successfully updated developer/publisher null status for {product_id}: {product_title}')
-                        
-                        if existing_full_json != json_pretty:
-                            logger.info(f'PQ >>> Existing entry for {product_id} is out of date. Updating...')
-                            
-                            #add custom db field values to the HTTP response list
-                            #gp_int_pervious_update
-                            values_pretty.insert(0, existing_update_timestamp)
-                            #gp_int_latest_update
-                            values_pretty.insert(1, str(datetime.now()))
-                            #gp_int_no_longer_listed
-                            values_pretty.insert(2, None)
-                            #gp_int_previous_full_json_payload
-                            values_pretty.insert(3, existing_full_json)
-                            #gp_int_full_json_payload
-                            values_pretty.insert(4, json_pretty)
-                            #add gp_id at the bottom of the list
-                            values_pretty.append(values_pretty[5])
-                            #remove gp_id from initial position
-                            del values_pretty[5]
-                            cursor.execute(UPDATE_ID_QUERY, numpy.array(values_pretty).tolist())
+                cursor.execute('SELECT gp_int_dev_pub_null, gp_int_full_json_payload, gp_int_latest_update, gp_developer, gp_publisher FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+                query_result = cursor.fetchone()
+                existing_dev_pub_null = query_result[0]
+                existing_full_json = query_result[1]
+                existing_update_timestamp = query_result[2]
+                existing_developer = query_result[3]
+                existing_publisher = query_result[4]
+                
+                if existing_full_json != json_pretty or existing_developer != developer or existing_publisher != publisher:
+                    if existing_developer != developer or existing_publisher != publisher:
+                        if developer is not None and publisher is not None and developer != '' and publisher != '':
+                            logger.info(f'PQ >>> Developer/publisher is out of date for {product_id}. Updating...')
+                            cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, gp_int_dev_pub_null = ? WHERE gp_id = ?', 
+                                           [developer, publisher, developer_fk, publisher_fk, dev_pub_null, int(product_id)])
                             db_connection.commit()
-                            logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}')
+                            logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}')
+                        else:
+                            dev_pub_null = 'true'
+                            #only log warning and update if the developer/publisher null status has just changed from false to true
+                            if existing_dev_pub_null == 'false':
+                                logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values!')
+                                
+                                cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ? WHERE gp_id = ?', 
+                                           [dev_pub_null, int(product_id)])
+                                db_connection.commit()
+                                logger.info(f'PQ ~~~ Successfully updated developer/publisher null status for {product_id}: {product_title}')
+                    
+                    if existing_full_json != json_pretty:
+                        logger.info(f'PQ >>> Existing entry for {product_id} is out of date. Updating...')
+                        
+                        #add custom db field values to the HTTP response list
+                        #gp_int_pervious_update
+                        values_pretty.insert(0, existing_update_timestamp)
+                        #gp_int_latest_update
+                        values_pretty.insert(1, str(datetime.now()))
+                        #gp_int_no_longer_listed
+                        values_pretty.insert(2, None)
+                        #gp_int_previous_full_json_payload
+                        values_pretty.insert(3, existing_full_json)
+                        #gp_int_full_json_payload
+                        values_pretty.insert(4, json_pretty)
+                        #add gp_id at the bottom of the list
+                        values_pretty.append(values_pretty[5])
+                        #remove gp_id from initial position
+                        del values_pretty[5]
+                        cursor.execute(UPDATE_ID_QUERY, numpy.array(values_pretty).tolist())
+                        db_connection.commit()
+                        logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}')
             
             cursor.close()
                 
