@@ -7,18 +7,9 @@ It provides several python3 scripts which call publicly available GOG APIs in or
 
 ## What do I need to do to get it running on my PC?
 
-**1.** You will need a **python3.6+** environment - I recommend getting **WinPython** if you're running the scripts on Windows: https://winpython.github.io/. Most Linux distros will come with python3 installed - make sure you pick one which comes with **python 3.6** or above.
+**1.** You will need a **python3.6+** environment. Most Linux distros will come with python3 installed - make sure you pick one which comes with **python 3.6** or above.
 
 **2.** The following python3 packages need to be installed: `html2text, numpy, requests, lxml, matplotlib, tk`
-
-On WinPython (Zero) you can get them by opening an admin console and using the following commands (numpy is already installed):
-```
-pip install html2text
-pip install requests
-pip install lxml
-pip install matplotlib
-pip install tk
-```
 
 On Linux, you will need to install the packages using the distro's default package manager. For Debian-based/derived distros, this should do the trick:
 ```
@@ -60,13 +51,10 @@ All 3 database tables should be populated with data. This is essentially a snaps
 
 Assuming you've followed the steps described above, you are now ready to do delta runs and detect any new developer/publisher entries along with changes to game ids and associated installer/file entries.
 
-All you need to do is run the corresponding batch file, depending on your OS:
+All you need to do is run the provided update bash script:
 ```
-gog_updates.bat - for Windows
-./gog_updates.sh - for Linux
+./gog_updates.sh
 ```
-
-**Note:** On Windows, make sure you add the path to the python executable to your PATH system variable before running the batch file, otherwise the OS will not know where to pick up the python executable from.
 
 Wait for the script to finish collecting all the required data.
 
