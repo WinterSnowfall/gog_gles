@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.40
-@date: 28/03/2020
+@version: 1.50
+@date: 10/08/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -42,6 +42,8 @@ logger.addHandler(logger_file_handler)
 db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
+OPTIMIZE_QUERY = 'PRAGMA optimize'
+
 #set the gog_lc cookie to avoid errors bought about by GOG dynamically determining the site language
 COOKIES = {
     'gog_lc': 'BE_EUR_en-US'
@@ -74,6 +76,8 @@ def gog_company_query(scan_mode):
                 company_list_pretty = []
                 
                 with sqlite3.connect(db_file_full_path) as db_connection:
+                    db_cursor = db_connection.cursor()
+                    
                     for element_tag in gogData_json['catalogFilters']:
                         element_value = element_tag['title']
                         logger.debug(f'CQ >>> Found a title entry with value: {element_value}')
@@ -94,14 +98,13 @@ def gog_company_query(scan_mode):
                                 logger.debug(f'CQ >>> Processing company: {company_name}')
                                 
                                 if scan_mode == 'full':
-                                    cursor = db_connection.cursor()
-                                    cursor.execute('SELECT COUNT(*) FROM gog_companies WHERE gc_name = ?', [company_name, ])
-                                    entry_count = cursor.fetchone()[0]
+                                    db_cursor.execute('SELECT COUNT(*) FROM gog_companies WHERE gc_name = ?', [company_name, ])
+                                    entry_count = db_cursor.fetchone()[0]
                                     
                                     if entry_count == 0:
                                         logger.info('CQ >>> Detected a new company entry...')
                                         
-                                        cursor.execute('INSERT INTO gog_companies VALUES(?,?,?,?)', 
+                                        db_cursor.execute('INSERT INTO gog_companies VALUES(?,?,?,?)', 
                                                     [None,
                                                      str(datetime.now()),
                                                      None,
@@ -117,27 +120,29 @@ def gog_company_query(scan_mode):
                                     logger.debug(f'CQ >>> Added company to update list: {company_name}')
                     
                     if scan_mode == 'update':
-                        cursor = db_connection.cursor()
-                        cursor.execute('SELECT gc_name FROM gog_companies ORDER BY 1')
-                        company_names = cursor.fetchall()
+                        db_cursor.execute('SELECT gc_name FROM gog_companies ORDER BY 1')
+                        company_names = db_cursor.fetchall()
                         
                         for company_row in company_names:
                             company = company_row[0]
                             logger.debug(f'CQ >>> Now processing company {company}...')
                             
                             if company not in company_list_pretty:
-                                cursor.execute('SELECT gc_int_no_longer_listed FROM gog_companies where gc_name = ?',
+                                db_cursor.execute('SELECT gc_int_no_longer_listed FROM gog_companies where gc_name = ?',
                                                [company, ])
-                                no_longer_listed = cursor.fetchone()[0]
+                                no_longer_listed = db_cursor.fetchone()[0]
                                 
                                 if no_longer_listed is None or no_longer_listed == '':
                                     logger.warning(f'CQ >>> Company {company} is no longer listed...')
-                                    cursor.execute('UPDATE gog_companies SET gc_int_no_longer_listed = ? WHERE gc_name = ?', 
+                                    db_cursor.execute('UPDATE gog_companies SET gc_int_no_longer_listed = ? WHERE gc_name = ?', 
                                                    [str(datetime.now()), company])
                                     db_connection.commit()
                                     logger.info(f'CQ --- Updated the DB entry for: {company}')
                                 else:
                                     logger.debug(f'CQ >>> Company {company} is already de-listed. Skipping.')
+                    
+                    logger.debug('Running PRAGMA optimize...')
+                    db_connection.execute(OPTIMIZE_QUERY)
 
             elif response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') != -1:
                 logger.error('CQ >>> Non-HTTP server-side exception returned. Aborting!')
@@ -172,29 +177,11 @@ args = parser.parse_args()
 
 logger.info('*** Running COMPANY scan script ***')
     
-#db file check/backup section
-if path.exists(db_file_full_path):
-    #create a backup of the existing db - mostly for debugging/recovery
-    copy2(db_file_full_path, db_file_full_path + '.bak')
-    logger.info('Successfully created DB backup.')
-else:
-    #subprocess.run(['python', 'gog_create_db.py']) 
-    logger.critical('Could find specified DB file!')
-    raise Exception()
-
-#conf file check/backup section
-if path.exists(conf_file_full_path):
-    #create a backup of the existing conf file - mostly for debugging/recovery
-    copy2(conf_file_full_path, conf_file_full_path + '.bak')
-    logger.info('Successfully created conf file backup.')
-else:
-    logger.critical('Could find specified conf file!')
-    raise Exception()
-    
 try:
     #reading from config file
     configParser.read(conf_file_full_path)
     #parsing generic parameters
+    db_backup = configParser['GENERAL']['db_backup']
     scan_mode = configParser['GENERAL']['scan_mode']
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
@@ -208,6 +195,18 @@ if len(argv) > 1:
         scan_mode = 'full'
     elif args.update:
         scan_mode = 'update'
+
+#allow scan_mode specific db backup strategies
+if db_backup == 'true' or db_backup == scan_mode:
+    #db file check/backup section
+    if path.exists(db_file_full_path):
+        #create a backup of the existing db - mostly for debugging/recovery
+        copy2(db_file_full_path, db_file_full_path + '.bak')
+        logger.info('Successfully created DB backup.')
+    else:
+        #subprocess.run(['python', 'gog_create_db.py']) 
+        logger.critical('Could find specified DB file!')
+        raise Exception()
 
 if scan_mode == 'full':
     logger.info('--- Running in FULL scan mode ---')

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.40
-@date: 28/03/2020
+@version: 1.50
+@date: 10/08/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -100,14 +100,10 @@ if not path.exists(db_file_full_path):
     logger.info('No DB file detected. Creating new SQLite DB...')
     
     with sqlite3.connect(db_file_full_path) as db_connection:
-        cursor = db_connection.cursor()
-        cursor.execute(CREATE_GOG_COMPANIES_QUERY)
-        cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
-        cursor.execute(CREATE_GOG_FILES_QUERY)
-        cursor.execute('CREATE INDEX gog_companies_name_index ON gog_companies (gc_name)')
-        cursor.execute('CREATE INDEX gog_products_id_index ON gog_products (gp_id)')
-        cursor.execute('CREATE INDEX gog_files_int_product_id_index ON gog_files (gf_int_product_id)')
-        
+        db_cursor = db_connection.cursor()
+        db_cursor.execute(CREATE_GOG_COMPANIES_QUERY)
+        db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
+        db_cursor.execute(CREATE_GOG_FILES_QUERY)
         db_connection.commit()
     
     logger.info('DB created successfully!')

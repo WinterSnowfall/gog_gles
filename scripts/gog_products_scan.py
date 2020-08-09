@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.40
-@date: 28/03/2020
+@version: 1.50
+@date: 10/08/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -92,6 +92,8 @@ COMPANY_SELECT_FILTER_QUERY = ('SELECT gc_int_nr FROM gog_companies WHERE '
                                 ') = ?')
 
 INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+
+OPTIMIZE_QUERY = 'PRAGMA optimize'
 
 ADALIA_MISSING_URL = 'https://gog.bigpizzapies.com/missingUrls.json'
 ADALIA_LEGACY_URL = 'https://gog.bigpizzapies.com/legacyUrls.json'
@@ -426,7 +428,7 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
         
         #response.status_code != 200
         else:
-            logger.debug(f'CQ >>> HTTP error code received: {response.status_code}.')
+            logger.error(f'CQ >>> HTTP error code received: {response.status_code}.')
             raise Exception()
         
     except:
@@ -450,11 +452,9 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             
             json_pretty = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
             values_pretty = gog_process_json_payload(json_parsed)
-                
-            cursor = db_connection.cursor()
             
-            cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', [int(product_id), ])
-            entry_count = cursor.fetchone()[0]
+            db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+            entry_count = db_cursor.fetchone()[0]
             
             '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
                 [0]  - id
@@ -484,9 +484,9 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             #if the API returned product title starts with 'product_title_', keep the existing product title
             if values_pretty[1] is not None and values_pretty[1].startswith('product_title_'):
                 logger.warning('PQ >>> Product title update skipped since an invalid value was returned!')
-                cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+                db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', [int(product_id), ])
                 #to be used for all loggers
-                values_pretty[1] = cursor.fetchone()[0]
+                values_pretty[1] = db_cursor.fetchone()[0]
             
             #to be used for all loggers
             product_title = values_pretty[1]
@@ -526,17 +526,17 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             if developer is not None:
                 dev_pub_null = 'false'
                 
-                cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [developer, ])
-                developer_fk_array = cursor.fetchone()
+                db_cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [developer, ])
+                developer_fk_array = db_cursor.fetchone()
                 if developer_fk_array is not None:
                     developer_fk = developer_fk_array[0]
                 else:
                     #also try to match the uppercase variant with some filtering of the developer 
                     #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
-                    cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
+                    db_cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
                                    [developer.upper().replace('.','').replace(':','')
                                     .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
-                    developer_fk_array = cursor.fetchone()
+                    developer_fk_array = db_cursor.fetchone()
                     
                     if developer_fk_array is not None:
                         developer_fk = developer_fk_array[0]
@@ -549,17 +549,17 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             if publisher is not None:
                 dev_pub_null = 'false'
                 
-                cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [publisher, ])
-                publisher_fk_array = cursor.fetchone()
+                db_cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', [publisher, ])
+                publisher_fk_array = db_cursor.fetchone()
                 if publisher_fk_array is not None:
                     publisher_fk = publisher_fk_array[0]
                 else:
                     #also try to match the uppercase variant with some filtering of the publisher 
                     #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
-                    cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
+                    db_cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
                                    [publisher.upper().replace('.','').replace(':','')
                                     .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
-                    publisher_fk_array = cursor.fetchone()
+                    publisher_fk_array = db_cursor.fetchone()
                     
                     if publisher_fk_array is not None:
                         publisher_fk = publisher_fk_array[0]
@@ -600,14 +600,14 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 #gp_publisher_fk
                 values_pretty.insert(16, publisher_fk)
 
-                cursor.execute(INSERT_ID_QUERY, numpy.array(values_pretty).tolist())
+                db_cursor.execute(INSERT_ID_QUERY, numpy.array(values_pretty).tolist())
                 db_connection.commit()
 
                 logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}')
             
             elif entry_count == 1:
-                cursor.execute('SELECT gp_int_dev_pub_null, gp_int_full_json_payload, gp_int_latest_update, gp_developer, gp_publisher FROM gog_products WHERE gp_id = ?', [int(product_id), ])
-                query_result = cursor.fetchone()
+                db_cursor.execute('SELECT gp_int_dev_pub_null, gp_int_full_json_payload, gp_int_latest_update, gp_developer, gp_publisher FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+                query_result = db_cursor.fetchone()
                 existing_dev_pub_null = query_result[0]
                 existing_full_json = query_result[1]
                 existing_update_timestamp = query_result[2]
@@ -618,26 +618,35 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     if existing_developer != developer or existing_publisher != publisher:
                         if developer is not None and publisher is not None and developer != '' and publisher != '':
                             logger.info(f'PQ >>> Developer/publisher is out of date for {product_id}. Updating...')
-                            cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, gp_int_dev_pub_null = ? WHERE gp_id = ?', 
-                                           [developer, publisher, developer_fk, publisher_fk, dev_pub_null, int(product_id)])
+                            db_cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
+                                           [developer, publisher, developer_fk, publisher_fk, dev_pub_null, existing_update_timestamp, str(datetime.now()), int(product_id)])
                             db_connection.commit()
                             logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}')
                         else:
-                            dev_pub_null = 'true'
                             #only log warning and update if the developer/publisher null status has just changed from false to true
                             if existing_dev_pub_null == 'false':
                                 logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values!')
                                 
-                                cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ? WHERE gp_id = ?', 
-                                           [dev_pub_null, int(product_id)])
+                                db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
+                                           [dev_pub_null, existing_update_timestamp, str(datetime.now()), int(product_id)])
                                 db_connection.commit()
-                                logger.info(f'PQ ~~~ Successfully updated developer/publisher null status for {product_id}: {product_title}')
+                                logger.info(f'PQ ~~~ Successfully set developer/publisher null status for {product_id}: {product_title}')
+                                
+                    #should only happen rarely, but the developer/publisher null status should be reset nevertheless
+                    elif existing_developer == developer and existing_publisher == publisher and existing_dev_pub_null == 'true':
+                        if developer is not None and publisher is not None and developer != '' and publisher != '':
+                            logger.info(f'PQ >>> Current developer/publisher for {product_id} is valid, but null status is set. Resetting...')
+                            
+                            db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
+                                        [dev_pub_null, existing_update_timestamp, str(datetime.now()), int(product_id)])
+                            db_connection.commit()
+                            logger.info(f'PQ ~~~ Successfully reset developer/publisher null status for {product_id}: {product_title}')
                     
                     if existing_full_json != json_pretty:
                         logger.info(f'PQ >>> Existing entry for {product_id} is out of date. Updating...')
                         
                         #add custom db field values to the HTTP response list
-                        #gp_int_pervious_update
+                        #gp_int_previous_update
                         values_pretty.insert(0, existing_update_timestamp)
                         #gp_int_latest_update
                         values_pretty.insert(1, str(datetime.now()))
@@ -651,28 +660,23 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         values_pretty.append(values_pretty[5])
                         #remove gp_id from initial position
                         del values_pretty[5]
-                        cursor.execute(UPDATE_ID_QUERY, numpy.array(values_pretty).tolist())
+                        db_cursor.execute(UPDATE_ID_QUERY, numpy.array(values_pretty).tolist())
                         db_connection.commit()
                         logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}')
-            
-            cursor.close()
                 
         elif scan_mode == 'update' and response.status_code == 200 and response.text is not None and response.text == '[]':
             logger.debug(f'PQ >>> Product with id {product_id} returned a blank list ("[]").')
-            cursor = db_connection.cursor()
             #check to see the existing value for gp_int_no_longer_listed
-            cursor.execute('SELECT gp_int_no_longer_listed FROM gog_products WHERE gp_id = ?', [int(product_id), ])
-            current_no_longer_listed = cursor.fetchone()[0]
+            db_cursor = db_connection.execute('SELECT gp_int_no_longer_listed FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+            current_no_longer_listed = db_cursor.fetchone()[0]
             
             #only alter the entry of not already marked as no longer listed
             if current_no_longer_listed is None:
                 logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
-                cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ?  WHERE gp_id = ?', [str(datetime.now()), int(product_id)])
+                db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ?  WHERE gp_id = ?', [str(datetime.now()), int(product_id)])
                 db_connection.commit()
                 logger.info(f'PQ --- Updated the DB entry for: {product_id}')
-                cursor.close()
             else:
-                cursor.close()
                 logger.info(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
         
         elif scan_mode == 'manual' and response.status_code == 200 and response.text is not None and response.text == '[]':
@@ -684,20 +688,17 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     
         #some ids apparently return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
-            cursor = db_connection.cursor()
             #check to see the existing value for gp_int_no_longer_listed
-            cursor.execute('SELECT gp_int_no_longer_listed FROM gog_products WHERE gp_id = ?', [int(product_id), ])
-            current_no_longer_listed = cursor.fetchone()[0]
+            db_cursor = db_connection.execute('SELECT gp_int_no_longer_listed FROM gog_products WHERE gp_id = ?', [int(product_id), ])
+            current_no_longer_listed = db_cursor.fetchone()[0]
             
             #only alter the entry of not already marked as no longer listed
             if current_no_longer_listed is None:
                 logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
-                cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', [str(datetime.now()), int(product_id)])
+                db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', [str(datetime.now()), int(product_id)])
                 db_connection.commit()
                 logger.info(f'PQ --- Updated the DB entry for: {product_id}')
-                cursor.close()
             else:
-                cursor.close()
                 logger.info(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
                     
         elif scan_mode == 'manual' and response.status_code == 404:
@@ -714,7 +715,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
         
         #response.status_code != 200
         else:
-            logger.debug(f'PQ >>> HTTP error code received: {response.status_code}.')
+            logger.error(f'PQ >>> HTTP error code received: {response.status_code}.')
             raise Exception()
         
     except:
@@ -806,15 +807,15 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
             
         if response.status_code == 200 and response.text is not None:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
-            cursor = db_connection.cursor()
+            db_cursor = db_connection.cursor()
             
             for extra_id in json_parsed:
                 logger.debug(f'TQ >>> Picked up the following product id: {extra_id}')
                 
                 #at least one of the ids is null for some reason, so do check
                 if extra_id is not None and extra_id != '':
-                    cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', [int(extra_id), ])
-                    entry_count = cursor.fetchone()[0]
+                    db_cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', [int(extra_id), ])
+                    entry_count = db_cursor.fetchone()[0]
                     
                     #only run a product scan if a new id was detected
                     if entry_count == 0:
@@ -839,8 +840,6 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
                     
                     else:
                         logger.debug('TQ >>> The id is already present in the gog_products table. Skipping!')
-                            
-            cursor.close()
         
         #this should not happen (ever)
         elif response.status_code == 200 and response.text is None:
@@ -849,7 +848,7 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
                  
         #response.status_code != 200
         else:
-            logger.error(f'TQ >>> New HTTP error code received: {response.status_code}. Aborting!')
+            logger.error(f'TQ >>> HTTP error code received: {response.status_code}. Aborting!')
             raise Exception()
     
     except:
@@ -858,10 +857,7 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
         #raise
         
 def gog_files_extract_parser(db_connection, product_id):
-    
-    db_cursor = db_connection.cursor()
-    
-    db_cursor.execute('SELECT gp_title, gp_int_full_json_payload FROM gog_products WHERE gp_id = ?', [product_id, ])
+    db_cursor = db_connection.execute('SELECT gp_title, gp_int_full_json_payload FROM gog_products WHERE gp_id = ?', [product_id, ])
     #retrieve the product_name and the latest json_payload
     result_row = db_cursor.fetchone()
     product_name = result_row[0]
@@ -991,30 +987,13 @@ group.add_argument('-e', '--extract', help='Extract file data from existing prod
 args = parser.parse_args()
 
 logger.info('*** Running PRODUCTS scan script ***')
-
-#db file check/backup section
-if path.exists(db_file_full_path):
-    #create a backup of the existing db - mostly for debugging/recovery
-    copy2(db_file_full_path, db_file_full_path + '.bak')
-    logger.info('Successfully created db backup.')
-else:
-    #subprocess.run(['python', 'gog_create_db.py'])
-    logger.critical('Could find specified DB file!')
-    raise Exception()
-    
-#conf file check/backup section
-if path.exists(conf_file_full_path):
-    #create a backup of the existing conf file - mostly for debugging/recovery
-    copy2(conf_file_full_path, conf_file_full_path + '.bak')
-    logger.info('Successfully created conf file backup.')
-else:
-    logger.critical('Could find specified conf file!')
-    raise Exception()
     
 try:
     #reading from config file
     configParser.read(conf_file_full_path)
     #parsing generic parameters
+    conf_backup = configParser['GENERAL']['conf_backup']
+    db_backup = configParser['GENERAL']['db_backup']
     scan_mode = configParser['GENERAL']['scan_mode']
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
@@ -1035,6 +1014,29 @@ if len(argv) > 1:
     elif args.extract:
         scan_mode = 'extract'
         
+#allow scan_mode specific conf backup strategies
+if conf_backup == 'true' or conf_backup == scan_mode:
+    #conf file check/backup section
+    if path.exists(conf_file_full_path):
+        #create a backup of the existing conf file - mostly for debugging/recovery
+        copy2(conf_file_full_path, conf_file_full_path + '.bak')
+        logger.info('Successfully created conf file backup.')
+    else:
+        logger.critical('Could find specified conf file!')
+        raise Exception()
+
+#allow scan_mode specific db backup strategies
+if db_backup == 'true' or db_backup == scan_mode:
+    #db file check/backup section
+    if path.exists(db_file_full_path):
+        #create a backup of the existing db - mostly for debugging/recovery
+        copy2(db_file_full_path, db_file_full_path + '.bak')
+        logger.info('Successfully created db backup.')
+    else:
+        #subprocess.run(['python', 'gog_create_db.py'])
+        logger.critical('Could find specified DB file!')
+        raise Exception()
+        
 if scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
     
@@ -1050,12 +1052,9 @@ if scan_mode == 'update':
         logger.info('Starting update scan on all existing DB entries...')
         
         with sqlite3.connect(db_file_full_path) as db_connection:
-            cursor = db_connection.cursor()
-            
             #skip products which are no longer listed
-            cursor.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? AND gp_int_no_longer_listed IS NULL ORDER BY 1', [last_id, ])
-            array_of_id_lists = cursor.fetchall()
-            cursor.close()
+            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? AND gp_int_no_longer_listed IS NULL ORDER BY 1', [last_id, ])
+            array_of_id_lists = db_cursor.fetchall()
             logger.debug('Retrieved all existing product ids from the DB...')
             
             #used to track the number of processed ids
@@ -1097,6 +1096,9 @@ if scan_mode == 'update':
                             retry_counter += 1
                             #uncomment for debugging purposes only
                             #raise
+                
+            logger.debug('Running PRAGMA optimize...')
+            db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
         reset_id = False
@@ -1127,6 +1129,9 @@ elif scan_mode == 'new':
                     #parse new ids from the games page ajax call
                     games_upcoming_url_page_count = gog_product_games_ajax_query(games_upcoming_url, scan_mode, session, db_connection)
                     page_no += 1
+                    
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
         pass
@@ -1160,6 +1165,9 @@ elif scan_mode == 'manual':
                             retry_counter += 1
                             #uncomment for debugging purposes only
                             #raise
+                            
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
         pass
@@ -1176,6 +1184,9 @@ elif scan_mode == 'third_party':
                 gog_products_third_party_query(ADALIA_MISSING_URL, 'manual', session, db_connection)
                 #all the ids in the catalog - adalia fundamentals
                 gog_products_third_party_query(ADALIA_LEGACY_URL, 'manual', session, db_connection)
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
         pass
@@ -1187,12 +1198,9 @@ elif scan_mode == 'extract':
     try:
         logger.info('Starting files scan on all existing DB entries...')
         
-        with sqlite3.connect(db_file_full_path) as db_connection:
-            db_cursor = db_connection.cursor()
-                
-            db_cursor.execute('SELECT gp_id FROM gog_products ORDER BY 1')
+        with sqlite3.connect(db_file_full_path) as db_connection:   
+            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products ORDER BY 1')
             array_of_id_lists = db_cursor.fetchall()
-            db_cursor.close()
             logger.debug('Retrieved all existing product ids from the DB...')
             
             for id_list in array_of_id_lists:
@@ -1216,6 +1224,9 @@ elif scan_mode == 'extract':
                         retry_counter += 1
                         #uncomment for debugging purposes only
                         #raise
+                        
+            logger.debug('Running PRAGMA optimize...')
+            db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
         pass

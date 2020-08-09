@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.40
-@date: 28/03/2020
+@version: 1.50
+@date: 10/08/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -36,10 +36,11 @@ logger.addHandler(logger_file_handler)
 ##db configuration block
 db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
 
+##CONSTANTS
+OPTIMIZE_QUERY = 'PRAGMA optimize'
+
 def plot_id_history():
     with sqlite3.connect(db_file_full_path) as db_connection:
-        cursor = db_connection.cursor()
-            
         pyplot.title('gog_visor - New GOG product id detections over time')
         window_title = f'gog_idd_{current_date}'
         pyplot.gcf().canvas.set_window_title(window_title)
@@ -59,8 +60,8 @@ def plot_id_history():
         green_labels = 0
  
         #in the interest of decompressing the chart, ignore the first 10 ids (which are in use)
-        cursor.execute('SELECT gp_int_added, gp_id, gp_game_type FROM gog_products where gp_id > 10 ORDER BY 1')
-        for row in cursor:
+        db_cursor = db_connection.execute('SELECT gp_int_added, gp_id, gp_game_type FROM gog_products where gp_id > 10 ORDER BY 1')
+        for row in db_cursor:
             plot_label = None
             
             current_date_string = row[0]
@@ -96,10 +97,13 @@ def plot_id_history():
         pyplot.ioff()
         pyplot.savefig(path.join('..', 'output_plot', window_title))
         #pyplot.show()
+                
+        logger.debug('Running PRAGMA optimize...')
+        db_connection.execute(OPTIMIZE_QUERY)
         
 def plot_id_distribution(interval, mode):
     with sqlite3.connect(db_file_full_path) as db_connection:
-        cursor = db_connection.cursor()
+        db_cursor = db_connection.cursor()
         
         if mode == 'dist':
             pyplot.ylabel('#ids')
@@ -135,14 +139,14 @@ def plot_id_distribution(interval, mode):
             pyplot.title(f'gog_visor - id distribution per intervals of {interval} ids (all ids)')
             window_title = f'gog_idt_{current_date}'
             pyplot.gcf().canvas.set_window_title(window_title)
-            cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
+            db_cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
         else:
             pyplot.title(f'gog_visor - discrete id probability per intervals of {interval} ids (all ids)')
             window_title = f'gog_dpy_{current_date}'
             pyplot.gcf().canvas.set_window_title(window_title)
-            cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
+            db_cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
             
-        for row in cursor:
+        for row in db_cursor:
             total_ids+=1
             current_id = row[0]
             logger.debug(f'current_id: {current_id}')
@@ -218,6 +222,9 @@ def plot_id_distribution(interval, mode):
         pyplot.ioff()
         pyplot.savefig(path.join('..', 'output_plot', window_title))
         #pyplot.show()
+        
+        logger.debug('Running PRAGMA optimize...')
+        db_connection.execute(OPTIMIZE_QUERY)
 
 ##main thread start
 
