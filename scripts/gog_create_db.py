@@ -104,6 +104,7 @@ if not path.exists(db_file_full_path):
         db_cursor.execute(CREATE_GOG_COMPANIES_QUERY)
         db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
         db_cursor.execute(CREATE_GOG_FILES_QUERY)
+        db_cursor.execute('CREATE INDEX gf_int_product_id_index ON gog_files (gf_int_product_id)')
         db_connection.commit()
     
     logger.info('DB created successfully!')
