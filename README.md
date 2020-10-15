@@ -60,6 +60,20 @@ Wait for the script to finish collecting all the required data.
 
 You can now run the provided SQL queries against the *gog_visor.db* file to list the updates. The queries are included in the sql script file (*sql\gog_updates.sql*). Any SQLite client can be used to this purpose. I personally recommend getting **DB Browser for SQLite**: https://sqlitebrowser.org/.
 
+## What about pricing scans?
+
+Pricing scans will automatically be triggered by update scans, as described above.
+
+The *gog_prices_scan.py* script will retrieve pricing data for configured currencies (or all currencies, as reported by the API) in a certain region. Multiple regions may be kept track of, but would require separate scans with the *country_code* parameter set accordingly in the config file.
+
+To run a price scan on existing product ids (taken from the gog_products table), simply run:
+
+```
+python3 gog_prices_db.py -f
+```
+
+To update existing pricing data, run the same command at a later point in time - price changes will be logged as new entries while exiting ones will be outdated, in the interest of tracking historical data and trends.
+
 ## Disclaimer
 
 I'm sure some may disagree with my style of coding or the lack of OOPness in my code. That's fair enough. Just FYI, I did not write these scripts with the intention of sharing them with anyone in particular (at least not initially), so you'll be bearing the full brunt of what I deemed was the most easily maintainable and hackable code I could write. Feel free to improve it as you see fit.

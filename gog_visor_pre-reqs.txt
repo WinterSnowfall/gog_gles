@@ -1,2 +1,2 @@
 #Ubuntu/Mint
-python3-html2text python3-numpy python3-requests python3-lxml python3-matplotlib python3-tk
+python3-html2text python3-requests python3-lxml python3-matplotlib python3-tk

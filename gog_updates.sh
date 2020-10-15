@@ -13,6 +13,11 @@ then
     if [ $? -eq 0 ]
     then
         python3 gog_products_scan.py -e
+        
+        if [ $? -eq 0 ]
+        then
+            python3 gog_prices_scan.py -f
+        fi
     fi
 fi
 

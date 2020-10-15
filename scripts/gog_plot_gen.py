@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.50
-@date: 10/08/2020
+@version: 1.60
+@date: 10/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -97,7 +97,7 @@ def plot_id_history():
         pyplot.ioff()
         pyplot.savefig(path.join('..', 'output_plot', window_title))
         #pyplot.show()
-                
+        
         logger.debug('Running PRAGMA optimize...')
         db_connection.execute(OPTIMIZE_QUERY)
         
@@ -107,7 +107,7 @@ def plot_id_distribution(interval, mode):
         
         if mode == 'dist':
             pyplot.ylabel('#ids')
-        else:
+        elif mode == 'prob':
             pyplot.ylabel('probability')
             
         pyplot.xlabel(f'intervals of {interval} ids')
@@ -140,7 +140,7 @@ def plot_id_distribution(interval, mode):
             window_title = f'gog_idt_{current_date}'
             pyplot.gcf().canvas.set_window_title(window_title)
             db_cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
-        else:
+        elif mode == 'prob':
             pyplot.title(f'gog_visor - discrete id probability per intervals of {interval} ids (all ids)')
             window_title = f'gog_dpy_{current_date}'
             pyplot.gcf().canvas.set_window_title(window_title)
@@ -152,8 +152,8 @@ def plot_id_distribution(interval, mode):
             logger.debug(f'current_id: {current_id}')
             id_not_processed = True
             
-            while(id_not_processed):
-                if(current_id <= current_interval):
+            while id_not_processed:
+                if current_id <= current_interval:
                     current_interval_ids+=1
                     id_not_processed = False
                 else:
@@ -183,14 +183,14 @@ def plot_id_distribution(interval, mode):
             logger.info('Discrete id probability values per interval:')
             
         for ids_value in current_interval_ids_list:
-            if mode == 'dist': 
+            if mode == 'dist':
                 if ids_value >= clearly_above_average:
                     colors.append('m')
                 elif ids_value <= clearly_below_average:
                     colors.append('c')
                 else:
                     colors.append('b')
-            else:
+            elif mode == 'prob':
                 current_probability = ids_value/total_ids
                 logger.info(f'{current_interval_list[interval_counter]}: {current_probability}')
                 current_interval_probability.append(current_probability)
@@ -199,7 +199,7 @@ def plot_id_distribution(interval, mode):
         if mode == 'dist':
             pyplot.bar(current_interval_list, current_interval_ids_list, width=interval, color=colors)
         
-        else:
+        elif mode == 'prob':
             id_probability_average = 1/len(current_interval_probability)
             clearly_above_average = id_probability_average + id_probability_average/1.5
             clearly_below_average = id_probability_average - id_probability_average/1.5

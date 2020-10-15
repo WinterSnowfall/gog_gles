@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.50
-@date: 10/08/2020
+@version: 1.60
+@date: 10/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -55,8 +55,7 @@ def gog_company_query(scan_mode):
     
     try:
         with requests.Session() as session:
-            #reuse session connection(s) to send a GET request
-            response = session.get(company_url, cookies=COOKIES, timeout=300)
+            response = session.get(company_url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
             
             logger.debug(f'CQ >>> HTTP response code is: {response.status_code}')
             
@@ -98,17 +97,14 @@ def gog_company_query(scan_mode):
                                 logger.debug(f'CQ >>> Processing company: {company_name}')
                                 
                                 if scan_mode == 'full':
-                                    db_cursor.execute('SELECT COUNT(*) FROM gog_companies WHERE gc_name = ?', [company_name, ])
+                                    db_cursor.execute('SELECT COUNT(*) FROM gog_companies WHERE gc_name = ?', (company_name, ))
                                     entry_count = db_cursor.fetchone()[0]
                                     
                                     if entry_count == 0:
                                         logger.info('CQ >>> Detected a new company entry...')
-                                        
+                                        #gc_int_nr, gc_int_added, gc_int_no_longer_listed, gc_name
                                         db_cursor.execute('INSERT INTO gog_companies VALUES(?,?,?,?)', 
-                                                    [None,
-                                                     str(datetime.now()),
-                                                     None,
-                                                     company_name])
+                                                    (None, datetime.now(), None, company_name))
                                         db_connection.commit()
                                         
                                         logger.info(f'CQ +++ Added a new DB entry for: {company_name}')
@@ -128,15 +124,15 @@ def gog_company_query(scan_mode):
                             logger.debug(f'CQ >>> Now processing company {company}...')
                             
                             if company not in company_list_pretty:
-                                db_cursor.execute('SELECT gc_int_no_longer_listed FROM gog_companies where gc_name = ?',
-                                               [company, ])
+                                db_cursor.execute('SELECT gc_int_no_longer_listed FROM gog_companies where gc_name = ?', (company, ))
                                 no_longer_listed = db_cursor.fetchone()[0]
                                 
                                 if no_longer_listed is None or no_longer_listed == '':
                                     logger.warning(f'CQ >>> Company {company} is no longer listed...')
-                                    db_cursor.execute('UPDATE gog_companies SET gc_int_no_longer_listed = ? WHERE gc_name = ?', 
-                                                   [str(datetime.now()), company])
+                                    
+                                    db_cursor.execute('UPDATE gog_companies SET gc_int_no_longer_listed = ? WHERE gc_name = ?', (datetime.now(), company))
                                     db_connection.commit()
+                                    
                                     logger.info(f'CQ --- Updated the DB entry for: {company}')
                                 else:
                                     logger.debug(f'CQ >>> Company {company} is already de-listed. Skipping.')
@@ -183,10 +179,12 @@ try:
     #parsing generic parameters
     db_backup = configParser['GENERAL']['db_backup']
     scan_mode = configParser['GENERAL']['scan_mode']
+    #parsing constants
+    HTTP_TIMEOUT = int(configParser['GENERAL']['http_timeout'])
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise Exception()
-    
+
 #detect any parameter overrides and set the scan_mode accordingly
 if len(argv) > 1:
     logger.info('Command-line parameter mode override detected.')
