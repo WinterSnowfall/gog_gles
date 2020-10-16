@@ -760,9 +760,20 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
         #unmapped ids will also return a 404 HTTP error code
         elif (scan_mode == 'manual' or scan_mode == 'removed' or scan_mode == 'third_party') and response.status_code == 404:
             logger.debug(f'PQ >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
-            
-        elif scan_mode == 'update' and (response.status_code == 429 or response.status_code == 509):
-            logger.critical('PQ >>> 429 or 509 HTTP error code received. Please abort process!')
+        
+        #classic GOG throttling scenario
+        elif response.status_code == 429:
+            logger.error('PQ >>> "Too Many Requests" 429 HTTP error code received.')
+            raise Exception()
+        
+        #new GOG throttling scenario (wohoo!)
+        elif response.status_code == 509:
+            logger.error('PQ >>> "Bandwidth Limit Exceeded" 509 HTTP error code received.')
+            raise Exception()
+        
+        #sometimes GOG's servers get uncooperative... (nothing critical, it just needs a retry)
+        elif response.status_code == 500:
+            logger.warn('PQ >>> "Internal Server Error" 500 HTTP error code received.')
             raise Exception()
         
         #response.status_code != 200

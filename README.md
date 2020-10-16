@@ -69,7 +69,7 @@ The *gog_prices_scan.py* script will retrieve pricing data for configured curren
 To run a price scan on existing product ids (taken from the gog_products table), simply run:
 
 ```
-python3 gog_prices_db.py -f
+python3 gog_prices_scan.py -f
 ```
 
 To update existing pricing data, run the same command at a later point in time - price changes will be logged as new entries while exiting ones will be outdated, in the interest of tracking historical data and trends.
