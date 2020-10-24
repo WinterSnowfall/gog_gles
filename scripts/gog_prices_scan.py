@@ -2,7 +2,7 @@
 '''
 @author: Winter Snowfall
 @version: 1.60
-@date: 10/10/2020
+@date: 23/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -12,7 +12,6 @@ import sqlite3
 import requests
 import logging
 import argparse
-from logging.handlers import RotatingFileHandler
 from sys import argv
 from shutil import copy2
 from configparser import ConfigParser
@@ -20,6 +19,7 @@ from datetime import datetime
 from os import path
 from time import sleep
 from collections import OrderedDict
+from logging.handlers import RotatingFileHandler
 
 ##global parameters init
 configParser = ConfigParser()
@@ -31,10 +31,9 @@ conf_file_full_path = path.join('..', 'conf', 'gog_prices_scan.conf')
 
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_prices_scan.log')
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
-logger_file_formatter = logging.Formatter(logger_format)
-logger_file_handler.setFormatter(logger_file_formatter)
+logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
+logger_file_handler.setFormatter(logging.Formatter(logger_format))
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 logger.addHandler(logger_file_handler)
@@ -43,7 +42,7 @@ logger.addHandler(logger_file_handler)
 db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
-INSERT_PRICES_QUERY = 'INSERT INTO gog_prices values (?,?,?,?,?,?,?,?,?,?)'
+INSERT_PRICES_QUERY = 'INSERT INTO gog_prices VALUES (?,?,?,?,?,?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
     
@@ -97,24 +96,24 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                         logger.debug(f'PRQ >>> bonus_wallet_funds is: {bonus_wallet_funds}')
                         
                         if bonus_wallet_funds is None:
-                            db_cursor.execute('SELECT COUNT(gpr_id) FROM gog_prices WHERE gpr_id = ? and gpr_country_code = ? and gpr_currency = ? '
-                                              'and gpr_base_price = ? and gpr_final_price = ? and gpr_bonus_wallet_funds IS NULL and gpr_int_outdated_on IS NULL',
+                            db_cursor.execute('SELECT COUNT(gpr_id) FROM gog_prices WHERE gpr_id = ? AND gpr_country_code = ? AND gpr_currency = ? '
+                                              'and gpr_base_price = ? AND gpr_final_price = ? AND gpr_bonus_wallet_funds IS NULL AND gpr_int_outdated_on IS NULL',
                                               (product_id, country_code, currency, base_price, final_price))
                         else:
-                            db_cursor.execute('SELECT COUNT(gpr_id) FROM gog_prices WHERE gpr_id = ? and gpr_country_code = ? and gpr_currency = ? '
-                                              'and gpr_base_price = ? and gpr_final_price = ? and gpr_bonus_wallet_funds = ? and gpr_int_outdated_on IS NULL',
+                            db_cursor.execute('SELECT COUNT(gpr_id) FROM gog_prices WHERE gpr_id = ? AND gpr_country_code = ? AND gpr_currency = ? '
+                                              'AND gpr_base_price = ? AND gpr_final_price = ? AND gpr_bonus_wallet_funds = ? AND gpr_int_outdated_on IS NULL',
                                               (product_id, country_code, currency, base_price, final_price, bonus_wallet_funds))
                             
                         existing_entries = db_cursor.fetchone()[0]
                         
                         if existing_entries == 0:
-                            db_cursor.execute('SELECT count(gpr_id) FROM gog_prices WHERE gpr_id = ? and gpr_country_code = ? '
-                                              'and gpr_currency = ? and gpr_int_outdated_on IS NULL', (product_id, country_code, currency))
+                            db_cursor.execute('SELECT count(gpr_id) FROM gog_prices WHERE gpr_id = ? AND gpr_country_code = ? '
+                                              'and gpr_currency = ? AND gpr_int_outdated_on IS NULL', (product_id, country_code, currency))
                             previous_entries = db_cursor.fetchone()[0]
                             
                             if previous_entries == 1:
-                                db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? and gpr_country_code = ? '
-                                                  'and gpr_currency = ? and gpr_int_outdated_on IS NULL', (datetime.now(), product_id, country_code, currency))
+                                db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? AND gpr_country_code = ? '
+                                                  'AND gpr_currency = ? AND gpr_int_outdated_on IS NULL', (datetime.now(), product_id, country_code, currency))
                                 db_connection.commit()
                                 logger.debug(f'PRQ ~~~ Succesfully outdated the previous DB entry for {product_id}, {country_code} and {currency} currency')
                             
@@ -138,9 +137,6 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                     
                     else:
                         logger.debug(f'PRQ >>> Currency {currency} is not in currencies_list. Skipping.')
-                
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
         
         #valid HTTP not found error code, issued for products that are not sold or no longer sold
         elif response.status_code == 400:
@@ -157,8 +153,8 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG prices scan (part of gog_visor) - a script to call publicly available GOG APIs \
-                                              in order to retrieve product price information.')
+parser = argparse.ArgumentParser(description=('GOG prices scan (part of gog_visor) - a script to call publicly available GOG APIs '
+                                              'in order to retrieve product price information.'))
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-f', '--full', help='Perform a full price scan, to add add/update prices for existing product IDs', action='store_true')
@@ -292,8 +288,8 @@ elif scan_mode == 'update':
             for id_list in array_of_id_lists:
                 current_product_id = id_list[0]
                 
-                db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? and gpr_country_code = ? '
-                                  'and gpr_int_outdated_on IS NULL', (datetime.now(), current_product_id, country_code))
+                db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? AND gpr_country_code = ? '
+                                  'AND gpr_int_outdated_on IS NULL', (datetime.now(), current_product_id, country_code))
                 db_connection.commit()
                 logger.info(f'Succesfully outdated the DB entry for {current_product_id}, {country_code} and all currencies')
                 

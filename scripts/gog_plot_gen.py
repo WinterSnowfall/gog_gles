@@ -2,7 +2,7 @@
 '''
 @author: Winter Snowfall
 @version: 1.60
-@date: 10/10/2020
+@date: 23/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -11,7 +11,6 @@ import sqlite3
 import datetime
 import logging
 import argparse
-from logging.handlers import RotatingFileHandler
 from os import path
 from sys import argv
 from matplotlib import pyplot
@@ -19,16 +18,16 @@ from matplotlib import dates
 from matplotlib import patches
 from matplotlib.ticker import MaxNLocator
 from matplotlib.ticker import ScalarFormatter
+from logging.handlers import RotatingFileHandler
 
 ##global parameters init
 current_date = datetime.datetime.date(datetime.datetime.now()).strftime('%Y%m%d')
 
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_plot_gen.log')
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
-logger_file_formatter = logging.Formatter(logger_format)
-logger_file_handler.setFormatter(logger_file_formatter)
+logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
+logger_file_handler.setFormatter(logging.Formatter(logger_format))
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 logger.addHandler(logger_file_handler)
@@ -38,6 +37,7 @@ db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
 OPTIMIZE_QUERY = 'PRAGMA optimize'
+CUTOFF_ID = 10
 
 def plot_id_history():
     with sqlite3.connect(db_file_full_path) as db_connection:
@@ -59,8 +59,9 @@ def plot_id_history():
         blue_labels = 0
         green_labels = 0
  
-        #in the interest of decompressing the chart, ignore the first 10 ids (which are in use)
-        db_cursor = db_connection.execute('SELECT gp_int_added, gp_id, gp_game_type FROM gog_products where gp_id > 10 ORDER BY 1')
+        #in the interest of decompressing the chart, ignore the first 'CUTOFF_ID' IDs
+        db_cursor = db_connection.execute('SELECT gp_int_added, gp_id, gp_game_type FROM gog_products '
+                                          'WHERE gp_id > ? ORDER BY 1', (CUTOFF_ID, ))
         for row in db_cursor:
             plot_label = None
             
@@ -89,7 +90,8 @@ def plot_id_history():
             else:
                 plot_point = 'k.'
             
-            pyplot.plot(datetime.datetime.strptime(current_date_string, '%Y-%m-%d %H:%M:%S.%f').date(), current_id, plot_point, label=plot_label)    
+            pyplot.plot(datetime.datetime.strptime(current_date_string, '%Y-%m-%d %H:%M:%S.%f').date(), 
+                        current_id, plot_point, label=plot_label)
 
         pyplot.gcf().autofmt_xdate()
         pyplot.legend(bbox_to_anchor=(1, 1.11), loc=1, borderaxespad=0.)
@@ -137,14 +139,14 @@ def plot_id_distribution(interval, mode):
         
         if mode == 'dist':
             pyplot.title(f'gog_visor - id distribution per intervals of {interval} ids (all ids)')
-            window_title = f'gog_idt_{current_date}'
+            window_title = f'gog_ida_{current_date}'
             pyplot.gcf().canvas.set_window_title(window_title)
-            db_cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
+            db_cursor.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? ORDER BY 1', (CUTOFF_ID, ))
         elif mode == 'prob':
             pyplot.title(f'gog_visor - discrete id probability per intervals of {interval} ids (all ids)')
-            window_title = f'gog_dpy_{current_date}'
+            window_title = f'gog_dpa_{current_date}'
             pyplot.gcf().canvas.set_window_title(window_title)
-            db_cursor.execute('SELECT gp_id FROM gog_products where gp_id > 10 ORDER BY 1')
+            db_cursor.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? ORDER BY 1', (CUTOFF_ID, ))
             
         for row in db_cursor:
             total_ids+=1
@@ -229,8 +231,8 @@ def plot_id_distribution(interval, mode):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG plot generation (part of gog_visor) - a script to generate GOG-related \
-                                              statistics and charts.')
+parser = argparse.ArgumentParser(description=('GOG plot generation (part of gog_visor) - a script to generate GOG-related '
+                                              'statistics and charts.'))
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-n', '--new', help='Generate id history chart', action='store_true')

@@ -2,7 +2,7 @@
 '''
 @author: Winter Snowfall
 @version: 1.60
-@date: 10/10/2020
+@date: 23/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,7 +13,6 @@ import sqlite3
 import requests
 import logging
 import argparse
-from logging.handlers import RotatingFileHandler
 from sys import argv
 from shutil import copy2
 from configparser import ConfigParser
@@ -23,6 +22,7 @@ from os import path
 from time import sleep
 from collections import OrderedDict
 from lxml import html as lhtml
+from logging.handlers import RotatingFileHandler
 
 ##global parameters init
 configParser = ConfigParser()
@@ -34,10 +34,9 @@ conf_file_full_path = path.join('..', 'conf', 'gog_products_scan.conf')
 
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_products_scan.log')
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
-logger_file_formatter = logging.Formatter(logger_format)
-logger_file_handler.setFormatter(logger_file_formatter)
+logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
+logger_file_handler.setFormatter(logging.Formatter(logger_format))
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 logger.addHandler(logger_file_handler)
@@ -424,7 +423,7 @@ def gog_process_json_payload(json_payload):
     array_index = 0
     for item in values_pretty:
         if item is not None:
-            if item == 'null' or item.strip() == '' or item.strip() == '""' or item.strip() == "''":
+            if item == 'null' or item.strip() == '' or item.strip() == '""' or item.strip() == '\'\'':
                 item = None
             else:
                 #remove JSON enforced double quotes, as they are not needed in the DB
@@ -672,7 +671,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 #only clear the unlisted date if the id is re-activated
                 elif scan_mode == 'archive':
                     logger.info(f'PQ >>> Found a previously unlisted entry with id {product_id}. Clearing unlisted status...')
-                    db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = NULL where gp_id = ?', (product_id, ))
+                    db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = NULL WHERE gp_id = ?', (product_id, ))
                     db_connection.commit()
                     logger.info(f'PQ ~~~ Successfully updated unlisted status for {product_id}: {product_title}')
                 #manual scans will be treated as update scans
@@ -926,12 +925,12 @@ def gog_files_extract_parser(db_connection, product_id):
             installer_file_downlink = installer_file['downlink']
             
             if installer_version is not None:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? and gf_int_type = \'installer\' and gf_id = ? '
-                                  'and gf_file_id = ? and gf_os = ? and gf_language = ? and gf_version = ? and gf_file_size = ?', 
+                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'installer\' AND gf_id = ? '
+                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_size = ?', 
                                   (product_id, installer_id, installer_file_id, installer_os, installer_language, installer_version, installer_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? and gf_int_type = \'installer\' and gf_id = ? '
-                                  'and gf_file_id = ? and gf_os = ? and gf_language = ? and gf_version is NULL and gf_file_size = ?', 
+                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'installer\' AND gf_id = ? '
+                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version is NULL AND gf_file_size = ?', 
                                   (product_id, installer_id, installer_file_id, installer_os, installer_language, installer_file_size))
                 
             existing_entries = db_cursor.fetchone()[0]
@@ -966,12 +965,12 @@ def gog_files_extract_parser(db_connection, product_id):
             patch_file_downlink = patch_file['downlink']
                 
             if patch_version is not None:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? and gf_int_type = \'patch\' and gf_id = ? '
-                                  'and gf_file_id = ? and gf_os = ? and gf_language = ? and gf_version = ? and gf_file_size = ?', 
+                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'patch\' AND gf_id = ? '
+                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_size = ?', 
                                   (product_id, patch_id, patch_file_id, patch_os, patch_language, patch_version, patch_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? and gf_int_type = \'patch\' and gf_id = ? '
-                                  'and gf_file_id = ? and gf_os = ? and gf_language = ? and gf_version is NULL and gf_file_size = ?', 
+                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'patch\' AND gf_id = ? '
+                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version is NULL AND gf_file_size = ?', 
                                   (product_id, patch_id, patch_file_id, patch_os, patch_language, patch_file_size))
                 
             existing_entries = db_cursor.fetchone()[0]
@@ -993,8 +992,8 @@ def gog_files_extract_parser(db_connection, product_id):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG products scan (part of gog_visor) - a script to call publicly available GOG APIs \
-                                              in order to retrieve product information and updates.')
+parser = argparse.ArgumentParser(description=('GOG products scan (part of gog_visor) - a script to call publicly available GOG APIs '
+                                              'in order to retrieve product information and updates.'))
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-n', '--new', help='Query new products', action='store_true')
@@ -1261,8 +1260,8 @@ elif scan_mode == 'removed':
         
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                #skip products which are no longer listed
-                db_cursor = db_connection.execute('SELECT gpu_id FROM gog_products_unlisted')
+                #select all products which are no longer listed, excluding potentinal duplicates
+                db_cursor = db_connection.execute('SELECT DISTINCT gpu_id FROM gog_products_unlisted')
                 array_of_id_lists = db_cursor.fetchall()
                 logger.debug('Retrieved all removed (unlisted) product ids from the DB...')
                 
@@ -1339,7 +1338,7 @@ elif scan_mode == 'archive':
                     for unlisted_id in unlisted_id_list:
                         logger.info(f'Now archiving id {unlisted_id}...')
                         db_cursor.execute(ARCHIVE_UNLISTED_ID_QUERY, (unlisted_id, ))
-                        db_cursor.execute('DELETE FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL and gp_id = ?', (unlisted_id, ))
+                        db_cursor.execute('DELETE FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL AND gp_id = ?', (unlisted_id, ))
                         db_connection.commit()
                         #to save some space, blank out the previous JSON information from the archived id
                         db_cursor.execute('UPDATE gog_products_unlisted SET gpu_int_previous_full_json_payload = NULL WHERE gpu_id = ?', (unlisted_id, ))

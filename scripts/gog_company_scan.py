@@ -2,7 +2,7 @@
 '''
 @author: Winter Snowfall
 @version: 1.60
-@date: 10/10/2020
+@date: 23/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,7 +13,6 @@ import sqlite3
 import requests
 import logging
 import argparse
-from logging.handlers import RotatingFileHandler
 from sys import argv
 from shutil import copy2
 from configparser import ConfigParser
@@ -21,6 +20,7 @@ from os import path
 from datetime import datetime
 from collections import OrderedDict
 from lxml import html as lhtml
+from logging.handlers import RotatingFileHandler
 
 ##global parameters init
 configParser = ConfigParser()
@@ -30,10 +30,9 @@ conf_file_full_path = path.join('..', 'conf', 'gog_company_scan.conf')
 
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_company_scan.log')
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
-logger_file_formatter = logging.Formatter(logger_format)
-logger_file_handler.setFormatter(logger_file_formatter)
+logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
+logger_file_handler.setFormatter(logging.Formatter(logger_format))
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 logger.addHandler(logger_file_handler)
@@ -59,7 +58,7 @@ def gog_company_query(scan_mode):
             
             logger.debug(f'CQ >>> HTTP response code is: {response.status_code}')
             
-            if response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') == -1:
+            if response.status_code == 200:
                 logger.info('CQ >>> Company query has returned a valid response...')
                 
                 html_tree = lhtml.fromstring(response.text)
@@ -92,7 +91,7 @@ def gog_company_query(scan_mode):
                                 logger.debug(f'CQ >>> company_name value: {company_name}')
                                 #workaround for a miss-match on 'Lion's Shade' caused by a leaning quote ('`') character
                                 if company_name.find('`') != -1:
-                                    company_name = company_name.replace('`', "'")
+                                    company_name = company_name.replace('`', '\'')
                                 #set this to debug in order to highlight new companies only
                                 logger.debug(f'CQ >>> Processing company: {company_name}')
                                 
@@ -103,7 +102,7 @@ def gog_company_query(scan_mode):
                                     if entry_count == 0:
                                         logger.info('CQ >>> Detected a new company entry...')
                                         #gc_int_nr, gc_int_added, gc_int_no_longer_listed, gc_name
-                                        db_cursor.execute('INSERT INTO gog_companies VALUES(?,?,?,?)', 
+                                        db_cursor.execute('INSERT INTO gog_companies VALUES (?,?,?,?)', 
                                                     (None, datetime.now(), None, company_name))
                                         db_connection.commit()
                                         
@@ -124,7 +123,7 @@ def gog_company_query(scan_mode):
                             logger.debug(f'CQ >>> Now processing company {company}...')
                             
                             if company not in company_list_pretty:
-                                db_cursor.execute('SELECT gc_int_no_longer_listed FROM gog_companies where gc_name = ?', (company, ))
+                                db_cursor.execute('SELECT gc_int_no_longer_listed FROM gog_companies WHERE gc_name = ?', (company, ))
                                 no_longer_listed = db_cursor.fetchone()[0]
                                 
                                 if no_longer_listed is None or no_longer_listed == '':
@@ -139,15 +138,6 @@ def gog_company_query(scan_mode):
                     
                     logger.debug('Running PRAGMA optimize...')
                     db_connection.execute(OPTIMIZE_QUERY)
-
-            elif response.status_code == 200 and response.text is not None and response.text.find('"error": "server_error"') != -1:
-                logger.error('CQ >>> Non-HTTP server-side exception returned. Aborting!')
-                raise Exception()
-            
-            #this should not happen (ever)
-            elif response.status_code == 200 and response.text is None:
-                logger.error('CQ >>> Received a null HTTP response text. Aborting!')
-                raise Exception()
             
             #response.status_code != 200
             else:
@@ -162,8 +152,8 @@ def gog_company_query(scan_mode):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG company scan (part of gog_visor) - a script to call publicly available GOG APIs \
-                                              in order to retrieve company information.')
+parser = argparse.ArgumentParser(description=('GOG company scan (part of gog_visor) - a script to call publicly available GOG APIs '
+                                              'in order to retrieve company information.'))
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-f', '--full', help='Perform a full company scan', action='store_true')

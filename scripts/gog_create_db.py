@@ -2,7 +2,7 @@
 '''
 @author: Winter Snowfall
 @version: 1.60
-@date: 10/10/2020
+@date: 23/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -10,15 +10,13 @@ Warning: Built for use with python 3.6+
 import sqlite3
 import logging
 import argparse
-from logging import FileHandler
 from os import path
 
 ##logging configuration block
 log_file_full_path = path.join('..', 'logs', 'gog_create_db.log')
+logger_file_handler = logging.FileHandler(log_file_full_path, mode='w', encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-logger_file_handler = FileHandler(log_file_full_path, mode='w', encoding='utf-8')
-logger_file_formatter = logging.Formatter(logger_format)
-logger_file_handler.setFormatter(logger_file_formatter)
+logger_file_handler.setFormatter(logging.Formatter(logger_format))
 logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 logger.addHandler(logger_file_handler)
@@ -135,8 +133,8 @@ CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices(gpr_int_nr INTEGER PRIMARY K
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description='GOG DB create (part of gog_visor) - a script to create the sqlite DB structure \
-                                              for the other gog_visor utilities.')
+parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_visor) - a script to create the sqlite DB structure '
+                                              'for the other gog_visor utilities.'))
 
 args = parser.parse_args()
 
