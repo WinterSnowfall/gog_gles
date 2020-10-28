@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.60
-@date: 23/10/2020
+@version: 1.70
+@date: 28/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -153,7 +153,7 @@ if not path.exists(db_file_full_path):
         db_cursor.execute('CREATE INDEX gpr_id_index ON gog_prices (gpr_id)')
         db_connection.commit()
     
-    logger.info('DB created successfully!')
+    logger.info('DB created successfully.')
 else:
     logger.error('Existing DB file detected. Please delete the existing file if you are attempting to recreate the DB!')
 

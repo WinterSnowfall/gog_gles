@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.60
-@date: 23/10/2020
+@version: 1.70
+@date: 28/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -151,7 +151,7 @@ def plot_id_distribution(interval, mode):
         for row in db_cursor:
             total_ids+=1
             current_id = row[0]
-            logger.debug(f'current_id: {current_id}')
+            logger.debug(f'current_id: {current_id}.')
             id_not_processed = True
             
             while id_not_processed:
@@ -159,8 +159,8 @@ def plot_id_distribution(interval, mode):
                     current_interval_ids+=1
                     id_not_processed = False
                 else:
-                    logger.debug(f'current_interval: {current_interval}')
-                    logger.debug(f'current_interval_ids: {current_interval_ids}')
+                    logger.debug(f'current_interval: {current_interval}.')
+                    logger.debug(f'current_interval_ids: {current_interval_ids}.')
                     if current_interval_ids > 0:
                         #entries between x-1 and x will be listed under interval x-1
                         current_interval_list.append(current_interval-interval)
@@ -169,13 +169,13 @@ def plot_id_distribution(interval, mode):
                     current_interval_ids = 0
             
         #also add the last interval which does not make the else branch
-        logger.debug(f'current_interval: {current_interval}')
-        logger.debug(f'current_interval_ids: {current_interval_ids}')
+        logger.debug(f'current_interval: {current_interval}.')
+        logger.debug(f'current_interval_ids: {current_interval_ids}.')
         current_interval_list.append(current_interval-interval)
         current_interval_ids_list.append(current_interval_ids)
         
-        logger.debug(f'current_interval_list size: {len(current_interval_list)}')
-        logger.debug(f'current_interval_ids size: {len(current_interval_ids_list)}')
+        logger.debug(f'current_interval_list size: {len(current_interval_list)}.')
+        logger.debug(f'current_interval_ids size: {len(current_interval_ids_list)}.')
         
         id_count_average = sum(current_interval_ids_list)/len(current_interval_ids_list)
         clearly_above_average = id_count_average + id_count_average/1.5

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.60
-@date: 23/10/2020
+@version: 1.70
+@date: 28/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -54,22 +54,22 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
     try:
         response = session.get(prices_url, timeout=HTTP_TIMEOUT)
         
-        logger.debug(f'PRQ >>> HTTP response code: {response.status_code}')
+        logger.debug(f'PQ >>> HTTP response code: {response.status_code}.')
         
         if response.status_code == 200:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
             
             items = json_parsed['_embedded']['prices']
-            logger.debug(f'PRQ >>> Items count: {len(items)}')
+            logger.debug(f'PQ >>> Items count: {len(items)}.')
             
             if len(items) > 0:
-                logger.debug(f'PRQ >>> Found something for id {product_id}...')
+                logger.debug(f'PQ >>> Found something for id {product_id}...')
             
                 db_cursor = db_connection.cursor()
                 
                 for json_item in items:
                     currency = json_item['currency']['code']
-                    logger.debug(f'PRQ >>> currency is: {currency}')
+                    logger.debug(f'PQ >>> currency is: {currency}.')
                     
                     if currency in currencies_list or 'all' in currencies_list:
                         #remove currency value from all price values along with any whitespace
@@ -78,14 +78,14 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                             base_price = float(base_price_str[:-2] + "." + base_price_str[-2:])
                         else:
                             base_price = 0
-                        logger.debug(f'PRQ >>> base_price is: {base_price}')
+                        logger.debug(f'PQ >>> base_price is: {base_price}.')
                         
                         final_price_str = json_item['finalPrice'].replace(currency,'').strip()
                         if final_price_str != '0':
                             final_price = float(final_price_str[:-2] + "." + final_price_str[-2:])
                         else:
                             final_price = 0
-                        logger.debug(f'PRQ >>> final_price is: {final_price}')
+                        logger.debug(f'PQ >>> final_price is: {final_price}.')
                         
                         bonus_wallet_funds_str = json_item['bonusWalletFunds'].replace(currency,'').strip()
                         if bonus_wallet_funds_str != '0':
@@ -93,7 +93,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                         #treat 0 value bonus_wallet_funds as None
                         else:
                             bonus_wallet_funds = None
-                        logger.debug(f'PRQ >>> bonus_wallet_funds is: {bonus_wallet_funds}')
+                        logger.debug(f'PQ >>> bonus_wallet_funds is: {bonus_wallet_funds}.')
                         
                         if bonus_wallet_funds is None:
                             db_cursor.execute('SELECT COUNT(gpr_id) FROM gog_prices WHERE gpr_id = ? AND gpr_country_code = ? AND gpr_currency = ? '
@@ -115,7 +115,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                                 db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? AND gpr_country_code = ? '
                                                   'AND gpr_currency = ? AND gpr_int_outdated_on IS NULL', (datetime.now(), product_id, country_code, currency))
                                 db_connection.commit()
-                                logger.debug(f'PRQ ~~~ Succesfully outdated the previous DB entry for {product_id}, {country_code} and {currency} currency')
+                                logger.debug(f'PQ ~~~ Succesfully outdated the previous DB entry for {product_id}, {country_code} and {currency} currency.')
                             
                             #gpr_int_nr, gpr_int_added, gpr_int_outdated_on, gpr_id, gpr_product_title, gpr_country_code
                             insert_values = [None, datetime.now(), None, product_id, product_title, country_code]
@@ -130,25 +130,30 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                         
                             db_cursor.execute(INSERT_PRICES_QUERY, insert_values)
                             db_connection.commit()
-                            logger.info(f'PRQ +++ Added a DB entry for {product_id}, {country_code} and {currency} currency')
+                            logger.info(f'PQ +++ Added a DB entry for {product_id}, {country_code} and {currency} currency.')
                         
                         elif existing_entries == 1:
-                            logger.debug(f'PRQ >>> Prices have not changed for {product_id}, {country_code} and {currency} currency. Skipping.')
+                            logger.debug(f'PQ >>> Prices have not changed for {product_id}, {country_code} and {currency} currency. Skipping.')
                     
                     else:
-                        logger.debug(f'PRQ >>> Currency {currency} is not in currencies_list. Skipping.')
+                        logger.debug(f'PQ >>> Currency {currency} is not in currencies_list. Skipping.')
         
         #valid HTTP not found error code, issued for products that are not sold or no longer sold
         elif response.status_code == 400:
-            logger.debug(f'PRQ >>> "Bad Request" 400 HTTP error code received for {product_id}.')
+            logger.debug(f'PQ >>> "Bad Request" 400 HTTP error code received for {product_id}.')
         
         elif response.status_code != 200:
-            logger.error(f'PRQ >>> HTTP error code received: {response.status_code}.')
+            logger.warning(f'PQ >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
+        
+        return True
     
     except:
-        logger.error(f'PRQ >>> Processing has failed for {product_id}!')
-        raise
+        logger.debug(f'PQ >>> Prices query has failed for {product_id}, {country_code} and {currency} currency.')
+        #uncomment for debugging purposes only
+        #raise
+        
+        return False
 
 ##main thread start
 
@@ -214,10 +219,10 @@ if scan_mode == 'full':
     logger.info('--- Running in FULL scan mode ---')
     
     last_id = int(configParser['FULL_SCAN']['last_id'])
-    id_save_interval = int(configParser['FULL_SCAN']['id_save_interval'])
+    ID_SAVE_INTERVAL = int(configParser['FULL_SCAN']['id_save_interval'])
     
     if last_id > 0:
-        logger.info(f'Restarting full scan from id: {last_id}')
+        logger.info(f'Restarting full scan from id: {last_id}.')
     
     try:
         logger.info('Starting full scan on all applicable DB entries...')
@@ -236,37 +241,34 @@ if scan_mode == 'full':
                     current_product_id = id_list[0]
                     current_product_title = id_list[1]
                     logger.debug(f'Now processing id {current_product_id}...')
-                    complete = False
+                    retries_complete = False
                     retry_counter = 0
                     
-                    while not complete:
-                        #will only enter in case of 509 HTTP errors, which are quite common due to GOG's throttling system
+                    while not retries_complete:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
                             sleep(2)
-                        try:
-                            gog_prices_query(current_product_id, current_product_title, country_code, currencies_list, session, db_connection)
-                            complete = True
                             
-                            if last_id_counter != 0 and last_id_counter % id_save_interval == 0:
-                                configParser.read(conf_file_full_path)
-                                configParser['FULL_SCAN']['last_id'] = str(current_product_id)
+                        retries_complete = gog_prices_query(current_product_id, current_product_title, country_code, currencies_list, session, db_connection)
+                            
+                        if retries_complete:                            
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
                                 
-                                with open(conf_file_full_path, 'w') as file:
-                                    configParser.write(file)
-                                    
-                                logger.info(f'Saved scan up to last_id of: {current_product_id}')
-                            
                             last_id_counter += 1
                                 
-                        except KeyboardInterrupt:
-                            raise
-                        except:
-                            complete = False
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #raise
+                                
+                    if last_id_counter != 0 and last_id_counter % ID_SAVE_INTERVAL == 0:
+                        configParser.read(conf_file_full_path)
+                        configParser['FULL_SCAN']['last_id'] = str(current_product_id)
+                        
+                        with open(conf_file_full_path, 'w') as file:
+                            configParser.write(file)
+                            
+                        logger.info(f'Saved scan up to last_id of {current_product_id}.')
             
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)
@@ -291,7 +293,7 @@ elif scan_mode == 'update':
                 db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? AND gpr_country_code = ? '
                                   'AND gpr_int_outdated_on IS NULL', (datetime.now(), current_product_id, country_code))
                 db_connection.commit()
-                logger.info(f'Succesfully outdated the DB entry for {current_product_id}, {country_code} and all currencies')
+                logger.info(f'Succesfully outdated the DB entry for {current_product_id}, {country_code} and all currencies.')
                 
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)

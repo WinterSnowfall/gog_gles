@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.60
-@date: 23/10/2020
+@version: 1.70
+@date: 28/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -129,7 +129,9 @@ ARCHIVE_UNLISTED_ID_QUERY = ('INSERT INTO gog_products_unlisted (gpu_int_added, 
                                                                 'gp_int_dev_pub_null, '
                                                                 'gp_int_latest_update, '
                                                                 'gp_int_is_movie, '
-                                                                'gp_int_previous_full_json_payload, '
+                                                                #to save some space, blank out the previous JSON information from 
+                                                                #the archived id - NULL instead of gp_int_previous_full_json_payload
+                                                                'NULL, '
                                                                 'gp_int_full_json_payload, '
                                                                 'gp_id, '
                                                                 'gp_title, '
@@ -442,10 +444,10 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
     try:
         response = session.get(product_url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
         
-        logger.debug(f'CQ >>> HTTP response code: {response.status_code}')
+        logger.debug(f'CQ >>> HTTP response code: {response.status_code}.')
         
         if response.status_code == 200:
-            logger.debug(f'CQ >>> HTTP response URL: {response.url}')
+            logger.debug(f'CQ >>> HTTP response URL: {response.url}.')
             
             #check if the response URL remained identical to with the provided product URL
             if response.url == product_url:
@@ -456,41 +458,40 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
                 parent_divs = html_tree.xpath('//div[contains(@class, "table__row")]/div[contains(@class, "details__category") and contains(@class, "table__row-label")]/text()')
                 #strip any detected values to fix occasional GOG paging whitespace
                 parent_divs = [item.strip() for item in parent_divs]
-                logger.debug(f'CQ >>> Found parent elements value: {parent_divs}')
+                logger.debug(f'CQ >>> Found parent elements value: {parent_divs}.')
                 
                 #check if the 'Company:' tag is present among the parent divs
                 if 'Company:' in parent_divs:
                     developer_raw = html_tree.xpath('//div[contains(@class, "details__content") and contains(@class, "table__row-content")]'
                                                     '/a[@class="details__link" and contains(@gog-track-event, "eventLabel: \'Developer:")]/text()')[0]
-                    logger.debug(f'CQ >>> Found developer raw value: {developer_raw}')
+                    logger.debug(f'CQ >>> Found developer raw value: {developer_raw}.')
                     #unescape any potentially remanent HTML notations such as '&amp;'
                     developer = html.unescape(developer_raw.strip())
                     
                     publisher_raw = html_tree.xpath('//div[contains(@class, "details__content") and contains(@class, "table__row-content")]'
                                                     '/a[@class="details__link" and contains(@gog-track-event, "eventLabel: \'Publisher:")]/text()')[0]
-                    logger.debug(f'CQ >>> Found publisher raw value: {publisher_raw}')
+                    logger.debug(f'CQ >>> Found publisher raw value: {publisher_raw}.')
                     #unescape any potentially remanent HTML notations such as '&amp;'
                     publisher = html.unescape(publisher_raw.strip())
                     
-                    return(developer, publisher)
+                    return (developer, publisher)
                 else:
                     if scan_mode == 'manual':
                         logger.warning('CQ >>> Unable to find a valid company div section. Perhaps the product is no longer being sold?')
-                    return(None, None)
+                    return (None, None)
             
             #invalid product URLs will redirect to the GOG games page
             else:
                 if scan_mode == 'manual':
                     logger.warning('CQ >>> Product URL has been redirected to the GOG games page. Perhaps the product is no longer being sold?')
-                return(None, None)
+                return (None, None)
         
-        #response.status_code != 200
         else:
-            logger.error(f'CQ >>> HTTP error code received: {response.status_code}.')
+            logger.warning(f'CQ >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
         
     except:
-        logger.error(f'CQ >>> Product company query has failed for {product_id}!')
+        logger.debug(f'CQ >>> Product company query has failed for {product_id}.')
         raise
     
 def gog_product_extended_query(product_id, scan_mode, session, db_connection):
@@ -500,7 +501,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
     try:
         response = session.get(product_url, timeout=HTTP_TIMEOUT)
             
-        logger.debug(f'PQ >>> HTTP response code: {response.status_code}')
+        logger.debug(f'PQ >>> HTTP response code: {response.status_code}.')
             
         if response.status_code == 200:
             if scan_mode == 'manual':
@@ -544,7 +545,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 
                 #if the API returned product title starts with 'product_title_', keep the existing product title
                 if values_pretty[1] is not None and values_pretty[1].startswith('product_title_'):
-                    logger.warning('PQ >>> Product title update skipped since an invalid value was returned!')
+                    logger.warning('PQ >>> Product title update skipped since an invalid value was returned.')
                     db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id, ))
                     #to be used for all loggers
                     values_pretty[1] = db_cursor.fetchone()[0]
@@ -579,7 +580,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     developer, publisher = gog_product_company_query(product_id, product_card, scan_mode, session)
                 else:
                     if scan_mode == 'manual':
-                        logger.warning('PQ >>> Product company query skipped since a null product card value was returned!')
+                        logger.warning('PQ >>> Product company query skipped since a null product card value was returned.')
                     developer = None
                     publisher = None
                 
@@ -602,7 +603,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         if developer_fk_array is not None:
                             developer_fk = developer_fk_array[0]
                         else:
-                            logger.warning(f'PQ >>> Unable to link developer name to an existing DB company entry for {product_id}!')
+                            logger.warning(f'PQ >>> Unable to link developer name to an existing DB company entry for {product_id}.')
                             developer_fk = None
                 else:
                     developer_fk = None
@@ -625,7 +626,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         if publisher_fk_array is not None:
                             publisher_fk = publisher_fk_array[0]
                         else:
-                            logger.warning(f'PQ >>> Unable to link publisher name to an existing DB company entry for {product_id}!')
+                            logger.warning(f'PQ >>> Unable to link publisher name to an existing DB company entry for {product_id}.')
                             publisher_fk = None
                 else:
                     publisher_fk = None
@@ -662,7 +663,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 db_cursor.execute(INSERT_ID_QUERY, values_pretty)
                 db_connection.commit()
 
-                logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}')
+                logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}.')
             
             elif entry_count == 1:
                 #do not update existing entries in a manual scan, since update/delta scans will take care of that
@@ -693,16 +694,16 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                                                   'gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
                                                   (developer, publisher, developer_fk, publisher_fk, dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
                                 db_connection.commit()
-                                logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}')
+                                logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}.')
                             else:
                                 #only log warning and update if the developer/publisher null status has just changed from false to true
                                 if existing_dev_pub_null == 'false':
-                                    logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values!')
+                                    logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values.')
                                     
                                     db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
                                                (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
                                     db_connection.commit()
-                                    logger.info(f'PQ ~~~ Successfully set developer/publisher null status for {product_id}: {product_title}')
+                                    logger.info(f'PQ ~~~ Successfully set developer/publisher null status for {product_id}: {product_title}.')
                                     
                         #should only happen rarely, but the developer/publisher null status should be reset nevertheless
                         elif existing_developer == developer and existing_publisher == publisher and existing_dev_pub_null == 'true':
@@ -712,7 +713,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                                 db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
                                             (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
                                 db_connection.commit()
-                                logger.info(f'PQ ~~~ Successfully reset developer/publisher null status for {product_id}: {product_title}')
+                                logger.info(f'PQ ~~~ Successfully reset developer/publisher null status for {product_id}: {product_title}.')
                         
                         if existing_full_json != json_pretty:
                             logger.info(f'PQ >>> Existing entry for {product_id} is out of date. Updating...')
@@ -735,7 +736,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                             #ideally this should be a tuple, but the values_pretty list will work just fine
                             db_cursor.execute(UPDATE_ID_QUERY, values_pretty)
                             db_connection.commit()
-                            logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}')
+                            logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
                             
         #existing ids return a 404 HTTP error code on removal
         elif (scan_mode == 'update' or scan_mode == 'archive') and response.status_code == 404:
@@ -748,67 +749,56 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
                 db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', (datetime.now(), product_id))
                 db_connection.commit()
-                logger.info(f'PQ --- Updated the DB entry for: {product_id}')
+                logger.info(f'PQ --- Updated the DB entry for: {product_id}.')
             else:
                 #force a retry scan if in archive mode
                 if scan_mode == 'archive':
                     raise Exception()
                 else:
-                    logger.info(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
+                    logger.debug(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
                     
         #unmapped ids will also return a 404 HTTP error code
         elif (scan_mode == 'manual' or scan_mode == 'removed' or scan_mode == 'third_party') and response.status_code == 404:
             logger.debug(f'PQ >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
         
-        #classic GOG throttling scenario
-        elif response.status_code == 429:
-            logger.error('PQ >>> "Too Many Requests" 429 HTTP error code received.')
-            raise Exception()
-        
-        #new GOG throttling scenario (wohoo!)
-        elif response.status_code == 509:
-            logger.error('PQ >>> "Bandwidth Limit Exceeded" 509 HTTP error code received.')
-            raise Exception()
-        
-        #sometimes GOG's servers get uncooperative... (nothing critical, it just needs a retry)
-        elif response.status_code == 500:
-            logger.warn('PQ >>> "Internal Server Error" 500 HTTP error code received.')
-            raise Exception()
-        
-        #response.status_code != 200
         else:
-            logger.error(f'PQ >>> HTTP error code received: {response.status_code}.')
+            logger.warning(f'PQ >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
+        
+        return True
         
     except:
-        logger.error(f'PQ >>> Product extended query has failed for {product_id}!')
-        raise
+        logger.debug(f'PQ >>> Product extended query has failed for {product_id}.')
+        #uncomment for debugging purposes only
+        #raise
+        
+        return False
     
 def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
     
-    logger.info(f'GQ >>> Querying url: {url}')
+    logger.info(f'GQ >>> Querying url: {url}.')
     
-    #return a value of 1, should something go terribly wrong
-    totalPages = 1
+    #return a value of 0, should something go terribly wrong
+    totalPages = 0
     
     try:
         response = session.get(url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
         
-        logger.debug(f'GQ >>> HTTP response code: {response.status_code}')
+        logger.debug(f'GQ >>> HTTP response code: {response.status_code}.')
         
         if response.status_code == 200:
             gogData_json = json.loads(response.text, object_pairs_hook=OrderedDict)
             
             #return the total number of pages, as listed in the response
             totalPages = gogData_json['totalPages']
-            logger.debug(f'GQ >>> Total pages: {totalPages}')
+            logger.debug(f'GQ >>> Total pages: {totalPages}.')
                         
             #use a set to avoid processing potentially duplicate ids
             id_set = set()
             
             for product_element in gogData_json['products']:
                 id_value = product_element['id']
-                logger.debug(f'GQ >>> Found the following id: {id_value}')
+                logger.debug(f'GQ >>> Found the following id: {id_value}.')
                 id_set.add(id_value)
             
             #transform the set to a list in order to be able to sort it
@@ -816,51 +806,47 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
             id_list.sort()
                 
             for product_id in id_list:
-                complete = False
                 logger.debug(f'GQ >>> Running scan for id {product_id}...')
+                retries_complete = False
                 retry_counter = 0
                 
-                while not complete:
+                while not retries_complete:
                     if retry_counter > 0:
                         logger.warning(f'GQ >>> Reprocessing id {product_id}...')
                         #allow a short respite before re-processing
                         sleep(2)
-                    try:
-                        gog_product_extended_query(product_id, scan_mode, session, db_connection)
-                        complete = True
-                    except:
-                        complete = False
+                    
+                    retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
+                    
+                    if not retries_complete:
                         retry_counter += 1
-                        #uncomment for debugging purposes only
-                        #raise
              
-        #response.status_code != 200
         else:
-            logger.error(f'GQ >>> HTTP error code received: {response.status_code}.')
+            logger.warning(f'GQ >>> HTTP error code {response.status_code} received.')
             raise Exception()
         
         return totalPages
                 
     except:
-        logger.error('GQ >>> Processing has failed!')
+        logger.critical('GQ >>> Processing has failed!')
         #uncomment for debugging purposes only
         #raise
     
 def gog_products_third_party_query(third_party_url, scan_mode, session, db_connection):
     
-    logger.info(f'TQ >>> Querying url: {third_party_url}')
+    logger.info(f'TQ >>> Querying url: {third_party_url}.')
     
     try:
         response = session.get(third_party_url, timeout=HTTP_TIMEOUT)
             
-        logger.debug(f'TQ >>> HTTP response code: {response.status_code}')
+        logger.debug(f'TQ >>> HTTP response code: {response.status_code}.')
             
         if response.status_code == 200:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
             db_cursor = db_connection.cursor()
             
             for extra_id in json_parsed:
-                logger.debug(f'TQ >>> Picked up the following product id: {extra_id}')
+                logger.debug(f'TQ >>> Picked up the following product id: {extra_id}.')
                 
                 #at least one of the ids is null for some reason, so do check
                 if extra_id is not None and extra_id != '':
@@ -869,34 +855,30 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
                     
                     #only run a product scan if a new id was detected
                     if entry_count == 0:
-                        logger.debug(f'TQ >>> Unknown id detected! Running scan for {extra_id}')
-                        complete = False
+                        logger.debug(f'TQ >>> Unknown id detected! Running scan for {extra_id}.')
+                        retries_complete = False
                         retry_counter = 0
                             
-                        while not complete:
+                        while not retries_complete:
                             if retry_counter > 0:
                                 logger.warning(f'TQ >>> Reprocessing id {extra_id}...')
                                 #allow a short respite before re-processing
                                 sleep(2)
-                            try:
-                                gog_product_extended_query(extra_id, scan_mode, session, db_connection)
-                                complete = True
-                            except:
-                                complete = False
+                            
+                            retries_complete = gog_product_extended_query(extra_id, scan_mode, session, db_connection)
+                            
+                            if not retries_complete:
                                 retry_counter += 1
-                                #uncomment for debugging purposes only
-                                #raise
                     
                     else:
                         logger.debug('TQ >>> The id is already present in the gog_products table. Skipping!')
                  
-        #response.status_code != 200
         else:
-            logger.error(f'TQ >>> HTTP error code received: {response.status_code}. Aborting!')
+            logger.warning(f'TQ >>> HTTP error code {response.status_code} received.')
             raise Exception()
     
     except:
-        logger.error('TQ >>> Processing has failed!')
+        logger.critical('TQ >>> Processing has failed!')
         #uncomment for debugging purposes only
         #raise
         
@@ -984,7 +966,7 @@ def gog_files_extract_parser(db_connection, product_id):
                                                        patch_version, patch_total_size, patch_file_id, patch_file_size, patch_file_downlink))
                 
                 #no need to print the os here, as it's included in the patch_id
-                logger.info(f'FQ +++ Added DB entry for {product_id} patch: {patch_id}, version_name {patch_version}')
+                logger.info(f'FQ +++ Added DB entry for {product_id} patch: {patch_id}, version_name {patch_version}.')
                 
     #batch commit
     db_connection.commit()
@@ -1067,10 +1049,10 @@ if scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
     
     last_id = int(configParser['UPDATE_SCAN']['last_id'])
-    last_id_save_frequency = int(configParser['UPDATE_SCAN']['last_id_save_frequency'])
+    LAST_ID_SAVE_FREQUENCY = int(configParser['UPDATE_SCAN']['last_id_save_frequency'])
     
     if last_id > 0:
-        logger.info(f'Restarting update scan from id: {last_id}')
+        logger.info(f'Restarting update scan from id: {last_id}.')
     
     try:
         logger.info('Starting update scan on all existing DB entries...')
@@ -1088,36 +1070,34 @@ if scan_mode == 'update':
                 for id_list in array_of_id_lists:
                     current_product_id = id_list[0]
                     logger.debug(f'Now processing id {current_product_id}...')
-                    complete = False
+                    retries_complete = False
                     retry_counter = 0
                     
-                    while not complete:
+                    while not retries_complete:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
                             sleep(2)
-                        try:
-                            gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
-                            complete = True
                             
-                            if last_id_counter != 0 and last_id_counter % last_id_save_frequency == 0:
-                                configParser.read(conf_file_full_path)
-                                configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
-                                
-                                with open(conf_file_full_path, 'w') as file:
-                                    configParser.write(file)
-                                    
-                                logger.info(f'Saved scan up to last_id of: {current_product_id}')
-                                
+                        retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                            
                             last_id_counter += 1
-                                
-                        except KeyboardInterrupt:
-                            raise
-                        except:
-                            complete = False
+                            
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #raise
+                            
+                    if last_id_counter != 0 and last_id_counter % LAST_ID_SAVE_FREQUENCY == 0:
+                        configParser.read(conf_file_full_path)
+                        configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
+                        
+                        with open(conf_file_full_path, 'w') as file:
+                            configParser.write(file)
+                            
+                        logger.info(f'Saved scan up to last_id of {current_product_id}.')
             
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)
@@ -1136,7 +1116,7 @@ elif scan_mode == 'new':
                 #start off as 1, then use whatever is returned by the ajax call
                 games_new_url_page_count = 1
                 #new games may number above 50 entries and can be split across 2+ pages in the ajax call
-                while page_no <= games_new_url_page_count:
+                while games_new_url_page_count != 0 and page_no <= games_new_url_page_count:
                     games_new_url = f'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page={page_no}&sort=date'
                     #parse new ids from the games page ajax call
                     games_new_url_page_count = gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
@@ -1146,7 +1126,7 @@ elif scan_mode == 'new':
                 #start off as 1, then use whatever is returned by the ajax call
                 games_upcoming_url_page_count = 1
                 #upcoming games may number above 50 entries and can be split across 2+ pages in the ajax call
-                while page_no <= games_upcoming_url_page_count:
+                while games_upcoming_url_page_count != 0 and page_no <= games_upcoming_url_page_count:
                     games_upcoming_url = f'https://www.gog.com/games/ajax/filtered?availability=coming&mediaType=game&page={page_no}&sort=date'
                     #parse new ids from the games page ajax call
                     games_upcoming_url_page_count = gog_product_games_ajax_query(games_upcoming_url, scan_mode, session, db_connection)
@@ -1169,23 +1149,23 @@ elif scan_mode == 'manual':
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
                 for product_id in product_id_list:
-                    logger.info(f'Running scan for id {product_id}')
-                    complete = False
+                    logger.info(f'Running scan for id {product_id}.')
+                    retries_complete = False
                     retry_counter = 0
                     
-                    while not complete:
+                    while not retries_complete:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {product_id}...')
                             #allow a short respite before re-processing
                             sleep(2)
-                        try:
-                            gog_product_extended_query(product_id, scan_mode, session, db_connection)
-                            complete = True
-                        except:
-                            complete = False
+                            
+                        retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')       
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #raise
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1227,24 +1207,8 @@ elif scan_mode == 'extract':
             for id_list in array_of_id_lists:
                 current_product_id = id_list[0]
                 logger.debug(f'Now processing id {current_product_id}...')
-                complete = False
-                retry_counter = 0
                 
-                while not complete:
-                    if retry_counter > 0:
-                        logger.warning(f'Reprocessing id {current_product_id}...')
-                            
-                    try:
-                        gog_files_extract_parser(db_connection, current_product_id)
-                        complete = True
-                        
-                    except KeyboardInterrupt:
-                        raise
-                    except:
-                        complete = False
-                        retry_counter += 1
-                        #uncomment for debugging purposes only
-                        #raise
+                gog_files_extract_parser(db_connection, current_product_id)
                         
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)
@@ -1260,7 +1224,7 @@ elif scan_mode == 'removed':
         
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                #select all products which are no longer listed, excluding potentinal duplicates
+                #select all products which are no longer listed, excluding potential duplicates
                 db_cursor = db_connection.execute('SELECT DISTINCT gpu_id FROM gog_products_unlisted')
                 array_of_id_lists = db_cursor.fetchall()
                 logger.debug('Retrieved all removed (unlisted) product ids from the DB...')
@@ -1268,21 +1232,22 @@ elif scan_mode == 'removed':
                 for id_list in array_of_id_lists:
                     current_product_id = id_list[0]
                     logger.debug(f'Now processing id {current_product_id}...')
-                    complete = False
+                    retries_complete = False
                     retry_counter = 0
                     
-                    while not complete:
+                    while not retries_complete:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
                             sleep(2)
-                        try:
-                            gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
-                            complete = True
-                        except:
-                            complete = False
+
+                        retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
                             retry_counter += 1
-                            #raise
                             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1296,64 +1261,61 @@ elif scan_mode == 'archive':
     try:
         logger.info('Starting archive procedure on all unlisted IDs...')
         
-        with sqlite3.connect(db_file_full_path) as db_connection:
-            #select all unlisted ids from the gog_products table
-            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL ORDER BY 1')
-            array_of_id_lists = db_cursor.fetchall()
-            logger.debug('Retrieved all unlisted product ids from the DB...')
-            
-            unlisted_id_list = []
-            
-            if len(array_of_id_lists) > 0:
-                logger.info('Retrying to access all unlisted ids...')
-            
-                with requests.Session() as session:
+        with requests.Session() as session:
+            with sqlite3.connect(db_file_full_path) as db_connection:
+                #select all unlisted ids from the gog_products table
+                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL ORDER BY 1')
+                array_of_id_lists = db_cursor.fetchall()
+                logger.debug('Retrieved all unlisted product ids from the DB...')
+                
+                unlisted_id_list = []
+                
+                if len(array_of_id_lists) > 0:
+                    logger.info('Retrying to access all unlisted ids...')
+    
                     for id_list in array_of_id_lists:
                         current_product_id = id_list[0]
                         logger.info(f'Now processing id {current_product_id}...')
-                        complete = False
+                        retries_complete = False
                         retry_counter = 0
                         
                         #allow only two retries, then consider the id parmenently unlisted
-                        while not complete and retry_counter < 3:
+                        while not retries_complete and retry_counter < 3:
                             if retry_counter > 0:
                                 logger.warning(f'Reprocessing id {current_product_id}...')
                                 #allow a short respite before re-processing
                                 sleep(2)
-                            try:
-                                gog_product_extended_query(product_id, scan_mode, session, db_connection)
-                                complete = True
-                            except:
-                                complete = False
+                                
+                            retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
+
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}.')
+                            else:
                                 retry_counter += 1
-                                #raise
                         
-                        if complete == False:
+                        if retries_complete == False:
                             unlisted_id_list.append(current_product_id)
-                        
-                if len(unlisted_id_list) > 0:
-                    logger.info('Archving all the unlisted ids...')
-                    db_cursor = db_connection.cursor()
-                    
-                    for unlisted_id in unlisted_id_list:
-                        logger.info(f'Now archiving id {unlisted_id}...')
-                        db_cursor.execute(ARCHIVE_UNLISTED_ID_QUERY, (unlisted_id, ))
-                        db_cursor.execute('DELETE FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL AND gp_id = ?', (unlisted_id, ))
-                        db_connection.commit()
-                        #to save some space, blank out the previous JSON information from the archived id
-                        db_cursor.execute('UPDATE gog_products_unlisted SET gpu_int_previous_full_json_payload = NULL WHERE gpu_id = ?', (unlisted_id, ))
-                        #for the sake of consistency, also remove any gog_files table entries saved under the archived id
-                        db_cursor.execute('DELETE FROM gog_files WHERE gf_int_product_id = ?', (unlisted_id, ))
-                        db_connection.commit()
-                    
-                    logger.info('Archiving completed.')
-            
-            else:
-                logger.info('No unlisted ids detected. Skipping archiving routine.')
-                
                             
-            logger.debug('Running PRAGMA optimize...')  
-            db_connection.execute(OPTIMIZE_QUERY)
+                    if len(unlisted_id_list) > 0:
+                        logger.info('Archving all the unlisted ids...')
+                        db_cursor = db_connection.cursor()
+                        
+                        for unlisted_id in unlisted_id_list:
+                            logger.info(f'Now archiving id {unlisted_id}...')
+                            db_cursor.execute(ARCHIVE_UNLISTED_ID_QUERY, (unlisted_id, ))
+                            db_cursor.execute('DELETE FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL AND gp_id = ?', (unlisted_id, ))
+                            #for the sake of consistency, also remove any gog_files table entries saved under the archived id
+                            db_cursor.execute('DELETE FROM gog_files WHERE gf_int_product_id = ?', (unlisted_id, ))
+                            db_connection.commit()
+                        
+                        logger.info('Archiving completed.')
+                
+                else:
+                    logger.info('No unlisted ids detected. Skipping archiving routine.')
+                                
+                logger.debug('Running PRAGMA optimize...')  
+                db_connection.execute(OPTIMIZE_QUERY)
                 
     except KeyboardInterrupt:
         pass

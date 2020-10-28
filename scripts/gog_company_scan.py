@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.60
-@date: 23/10/2020
+@version: 1.70
+@date: 28/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -56,7 +56,7 @@ def gog_company_query(scan_mode):
         with requests.Session() as session:
             response = session.get(company_url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
             
-            logger.debug(f'CQ >>> HTTP response code is: {response.status_code}')
+            logger.debug(f'CQ >>> HTTP response code is: {response.status_code}.')
             
             if response.status_code == 200:
                 logger.info('CQ >>> Company query has returned a valid response...')
@@ -67,7 +67,7 @@ def gog_company_query(scan_mode):
                                                       #remove 10 chars to adjust for extra spacing and endline
                                                       gogData_container_html.find('var translationData = ') - 10]
                 gogData_pretty = json.dumps(gogData_html, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
-                logger.debug(f'CQ >>> gogData value: {gogData_pretty}')
+                logger.debug(f'CQ >>> gogData value: {gogData_pretty}.')
                 
                 gogData_json = json.loads(gogData_html, object_pairs_hook=OrderedDict)
                 
@@ -78,22 +78,22 @@ def gog_company_query(scan_mode):
                     
                     for element_tag in gogData_json['catalogFilters']:
                         element_value = element_tag['title']
-                        logger.debug(f'CQ >>> Found a title entry with value: {element_value}')
+                        logger.debug(f'CQ >>> Found a title entry with value: {element_value}.')
                         
                         if element_value == 'Company':
                             for choice_element in element_tag['choices']:
                                 logger.debug('CQ >>> Parsing a new company entry...')
                                 #strip any trailing or leading whitespace
                                 company_raw_name = choice_element['title'].strip()
-                                logger.debug(f'CQ >>> company_raw_name value: {company_raw_name}')
+                                logger.debug(f'CQ >>> company_raw_name value: {company_raw_name}.')
                                 #unescape any potentially remanent HTML notations such as '&amp;'
                                 company_name = html.unescape(company_raw_name)
-                                logger.debug(f'CQ >>> company_name value: {company_name}')
+                                logger.debug(f'CQ >>> company_name value: {company_name}.')
                                 #workaround for a miss-match on 'Lion's Shade' caused by a leaning quote ('`') character
                                 if company_name.find('`') != -1:
                                     company_name = company_name.replace('`', '\'')
                                 #set this to debug in order to highlight new companies only
-                                logger.debug(f'CQ >>> Processing company: {company_name}')
+                                logger.debug(f'CQ >>> Processing company: {company_name}.')
                                 
                                 if scan_mode == 'full':
                                     db_cursor.execute('SELECT COUNT(*) FROM gog_companies WHERE gc_name = ?', (company_name, ))
@@ -106,13 +106,13 @@ def gog_company_query(scan_mode):
                                                     (None, datetime.now(), None, company_name))
                                         db_connection.commit()
                                         
-                                        logger.info(f'CQ +++ Added a new DB entry for: {company_name}')
+                                        logger.info(f'CQ +++ Added a new DB entry for: {company_name}.')
                                     else:
                                         logger.debug(f'CQ >>> Company {company_name} already has a DB entry. Skipping...')
                             
                                 elif scan_mode == 'update':
                                     company_list_pretty.append(company_name)
-                                    logger.debug(f'CQ >>> Added company to update list: {company_name}')
+                                    logger.debug(f'CQ >>> Added company to update list: {company_name}.')
                     
                     if scan_mode == 'update':
                         db_cursor.execute('SELECT gc_name FROM gog_companies ORDER BY 1')
@@ -132,20 +132,19 @@ def gog_company_query(scan_mode):
                                     db_cursor.execute('UPDATE gog_companies SET gc_int_no_longer_listed = ? WHERE gc_name = ?', (datetime.now(), company))
                                     db_connection.commit()
                                     
-                                    logger.info(f'CQ --- Updated the DB entry for: {company}')
+                                    logger.info(f'CQ --- Updated the DB entry for: {company}.')
                                 else:
                                     logger.debug(f'CQ >>> Company {company} is already de-listed. Skipping.')
                     
                     logger.debug('Running PRAGMA optimize...')
                     db_connection.execute(OPTIMIZE_QUERY)
             
-            #response.status_code != 200
             else:
-                logger.error(f'CQ >>> HTTP error code received: {response.status_code}. Aborting!')
+                logger.error(f'CQ >>> HTTP error code {response.status_code} received. Aborting!')
                 raise Exception()
     
     except:
-        logger.error('CQ >>> Exception encountered. Aborting!')
+        logger.critical('CQ >>> Company query has failed. Aborting!')
         #uncomment for debugging purposes only
         #raise
 
