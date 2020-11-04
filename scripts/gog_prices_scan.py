@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.70
-@date: 28/10/2020
+@version: 1.80
+@date: 31/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -115,7 +115,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                                 db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? AND gpr_country_code = ? '
                                                   'AND gpr_currency = ? AND gpr_int_outdated_on IS NULL', (datetime.now(), product_id, country_code, currency))
                                 db_connection.commit()
-                                logger.debug(f'PQ ~~~ Succesfully outdated the previous DB entry for {product_id}, {country_code} and {currency} currency.')
+                                logger.debug(f'PQ ~~~ Succesfully outdated the previous DB entry for {product_id}: {product_title}, {country_code}, {currency}.')
                             
                             #gpr_int_nr, gpr_int_added, gpr_int_outdated_on, gpr_id, gpr_product_title, gpr_country_code
                             insert_values = [None, datetime.now(), None, product_id, product_title, country_code]
@@ -130,13 +130,13 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                         
                             db_cursor.execute(INSERT_PRICES_QUERY, insert_values)
                             db_connection.commit()
-                            logger.info(f'PQ +++ Added a DB entry for {product_id}, {country_code} and {currency} currency.')
+                            logger.info(f'PQ +++ Added a DB entry for {product_id}: {product_title}, {country_code}, {currency}.')
                         
                         elif existing_entries == 1:
-                            logger.debug(f'PQ >>> Prices have not changed for {product_id}, {country_code} and {currency} currency. Skipping.')
+                            logger.debug(f'PQ >>> Prices have not changed for {product_id}, {country_code}, {currency}. Skipping.')
                     
                     else:
-                        logger.debug(f'PQ >>> Currency {currency} is not in currencies_list. Skipping.')
+                        logger.debug(f'PQ >>> {currency} is not in currencies_list. Skipping.')
         
         #valid HTTP not found error code, issued for products that are not sold or no longer sold
         elif response.status_code == 400:
@@ -149,7 +149,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
         return True
     
     except:
-        logger.debug(f'PQ >>> Prices query has failed for {product_id}, {country_code} and {currency} currency.')
+        logger.debug(f'PQ >>> Prices query has failed for {product_id}, {country_code}, {currency}.')
         #uncomment for debugging purposes only
         #raise
         
@@ -283,17 +283,20 @@ elif scan_mode == 'update':
         logger.info('Starting update scan on all applicable DB entries...')
         
         with sqlite3.connect(db_file_full_path) as db_connection:
-            db_cursor = db_connection.execute('SELECT gpr_id FROM gog_prices WHERE gpr_id NOT IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
+            db_cursor = db_connection.execute('SELECT gpr_id, gpr_product_title FROM gog_prices WHERE gpr_id NOT IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
             array_of_id_lists = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
             
             for id_list in array_of_id_lists:
                 current_product_id = id_list[0]
+                current_product_title = id_list[1]
+                
+                logger.debug(f'Now processing id {current_product_id}...')
                 
                 db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated_on = ? WHERE gpr_id = ? AND gpr_country_code = ? '
                                   'AND gpr_int_outdated_on IS NULL', (datetime.now(), current_product_id, country_code))
                 db_connection.commit()
-                logger.info(f'Succesfully outdated the DB entry for {current_product_id}, {country_code} and all currencies.')
+                logger.info(f'Succesfully outdated the DB entry for {current_product_id}: {current_product_title}, {country_code}, all currencies.')
                 
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.70
-@date: 28/10/2020
+@version: 1.80
+@date: 31/10/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -436,7 +436,7 @@ def gog_process_json_payload(json_payload):
         
     return values_pretty
 
-def gog_product_company_query(product_id, product_url, scan_mode, session):
+def gog_product_company_query(product_id, product_url, session):
     #convert to https, as some product_card urls can be http-based
     if product_url.find('http://') != -1:
         product_url = product_url.replace('http://', 'https://')
@@ -451,8 +451,7 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
             
             #check if the response URL remained identical to with the provided product URL
             if response.url == product_url:
-                if scan_mode == 'manual':
-                    logger.info(f'CQ >>> Product company query for id {product_id} has returned a valid response...')
+                logger.debug(f'CQ >>> Product company query for id {product_id} has returned a valid response...')
                     
                 html_tree = lhtml.fromstring(response.text)
                 parent_divs = html_tree.xpath('//div[contains(@class, "table__row")]/div[contains(@class, "details__category") and contains(@class, "table__row-label")]/text()')
@@ -476,14 +475,12 @@ def gog_product_company_query(product_id, product_url, scan_mode, session):
                     
                     return (developer, publisher)
                 else:
-                    if scan_mode == 'manual':
-                        logger.warning('CQ >>> Unable to find a valid company div section. Perhaps the product is no longer being sold?')
+                    logger.debug('CQ >>> Unable to find a valid company div section. Perhaps the product is no longer being sold?')
                     return (None, None)
             
             #invalid product URLs will redirect to the GOG games page
             else:
-                if scan_mode == 'manual':
-                    logger.warning('CQ >>> Product URL has been redirected to the GOG games page. Perhaps the product is no longer being sold?')
+                logger.debug('CQ >>> Product URL has been redirected to the GOG games page. Perhaps the product is no longer being sold?')
                 return (None, None)
         
         else:
@@ -577,7 +574,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 ##company query call
                 product_card = json_parsed['links']['product_card']
                 if product_card is not None and product_card != '':
-                    developer, publisher = gog_product_company_query(product_id, product_card, scan_mode, session)
+                    developer, publisher = gog_product_company_query(product_id, product_card, session)
                 else:
                     if scan_mode == 'manual':
                         logger.warning('PQ >>> Product company query skipped since a null product card value was returned.')
@@ -926,7 +923,7 @@ def gog_files_extract_parser(db_connection, product_id):
                                                        installer_version, installer_total_size, installer_file_id, installer_file_size, installer_file_downlink))
                 
                 #no need to print the os here, as it's included in the installer_id
-                logger.info(f'FQ +++ Added DB entry for {product_id}: {installer_id}, version_name {installer_version}')
+                logger.info(f'FQ +++ Added DB entry for {product_id}: {installer_product_name}, {installer_id}, version {installer_version}.')
     
     #process patch entries
     for patch_entry in json_parsed_patches:
@@ -966,7 +963,7 @@ def gog_files_extract_parser(db_connection, product_id):
                                                        patch_version, patch_total_size, patch_file_id, patch_file_size, patch_file_downlink))
                 
                 #no need to print the os here, as it's included in the patch_id
-                logger.info(f'FQ +++ Added DB entry for {product_id} patch: {patch_id}, version_name {patch_version}.')
+                logger.info(f'FQ +++ Added DB entry for {product_id}: {patch_product_name}, {patch_id}, version {patch_version}.')
                 
     #batch commit
     db_connection.commit()
@@ -1149,7 +1146,7 @@ elif scan_mode == 'manual':
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
                 for product_id in product_id_list:
-                    logger.info(f'Running scan for id {product_id}.')
+                    logger.info(f'Running scan for id {product_id}...')
                     retries_complete = False
                     retry_counter = 0
                     
@@ -1163,7 +1160,7 @@ elif scan_mode == 'manual':
                         
                         if retries_complete:
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')       
+                                logger.info(f'Succesfully retried for {product_id}.')       
                         else:
                             retry_counter += 1
                 
@@ -1241,7 +1238,7 @@ elif scan_mode == 'removed':
                             #allow a short respite before re-processing
                             sleep(2)
 
-                        retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
+                        retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
                         
                         if retries_complete:
                             if retry_counter > 0:
@@ -1286,7 +1283,7 @@ elif scan_mode == 'archive':
                                 #allow a short respite before re-processing
                                 sleep(2)
                                 
-                            retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
+                            retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
 
                             if retries_complete:
                                 if retry_counter > 0:
