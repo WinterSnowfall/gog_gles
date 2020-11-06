@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.80
-@date: 31/10/2020
+@version: 1.90
+@date: 05/11/2020
 
 Warning: Built for use with python 3.6+
 '''
 
 import json
 import html
+import threading
 import sqlite3
+import signal
 import requests
 import logging
 import argparse
@@ -20,12 +22,15 @@ from html2text import html2text
 from datetime import datetime
 from os import path
 from time import sleep
+from queue import Queue
 from collections import OrderedDict
 from lxml import html as lhtml
 from logging.handlers import RotatingFileHandler
 
 ##global parameters init
 configParser = ConfigParser()
+db_lock = threading.Lock()
+config_lock = threading.Lock()
 terminate_signal = False
 reset_id = True
 
@@ -172,6 +177,11 @@ ADALIA_LEGACY_URL = 'https://gog.bigpizzapies.com/legacyUrls.json'
 COOKIES = {
     'gog_lc': 'BE_EUR_en-US'
 }
+
+def sigterm_handler(signum, frame):
+    logger.info('Stopping scan due to SIGTERM...')
+    
+    raise SystemExit(0)
 
 def gog_process_json_payload(json_payload):
     values_pretty = [json.dumps(item, sort_keys=True, ensure_ascii=False) for item in json_payload.values()]
@@ -501,7 +511,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
         logger.debug(f'PQ >>> HTTP response code: {response.status_code}.')
             
         if response.status_code == 200:
-            if scan_mode == 'manual':
+            if scan_mode == 'full':
                 logger.info(f'PQ >>> Product query for id {product_id} has returned a valid response...')
             
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
@@ -512,9 +522,9 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', (product_id, ))
             entry_count = db_cursor.fetchone()[0]
             
-            #no need to do any advanced processing if an entry is found in 'manual' scan mode,
+            #no need to do any advanced processing if an entry is found in 'full' scan mode,
             #since that entry will be skipped anyway
-            if not (entry_count == 1 and scan_mode == 'manual'):
+            if not (entry_count == 1 and scan_mode == 'full'):
                 '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
                     [0]  - id
                     [1]  - title
@@ -576,7 +586,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 if product_card is not None and product_card != '':
                     developer, publisher = gog_product_company_query(product_id, product_card, session)
                 else:
-                    if scan_mode == 'manual':
+                    if scan_mode == 'full' or scan_mode == 'manual':
                         logger.warning('PQ >>> Product company query skipped since a null product card value was returned.')
                     developer = None
                     publisher = None
@@ -657,20 +667,22 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 #gp_publisher_fk
                 values_pretty.insert(15, publisher_fk)
                 #ideally this should be a tuple, but the values_pretty list will work just fine
-                db_cursor.execute(INSERT_ID_QUERY, values_pretty)
-                db_connection.commit()
+                with db_lock:
+                    db_cursor.execute(INSERT_ID_QUERY, values_pretty)
+                    db_connection.commit()
 
                 logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}.')
             
             elif entry_count == 1:
-                #do not update existing entries in a manual scan, since update/delta scans will take care of that
-                if scan_mode == 'manual':
+                #do not update existing entries in a full scan, since update/delta scans will take care of that
+                if scan_mode == 'full':
                     logger.info(f'PQ >>> Found an existing db entry with id {product_id}. Skipping.')
                 #only clear the unlisted date if the id is re-activated
                 elif scan_mode == 'archive':
                     logger.info(f'PQ >>> Found a previously unlisted entry with id {product_id}. Clearing unlisted status...')
-                    db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = NULL WHERE gp_id = ?', (product_id, ))
-                    db_connection.commit()
+                    with db_lock:
+                        db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = NULL WHERE gp_id = ?', (product_id, ))
+                        db_connection.commit()
                     logger.info(f'PQ ~~~ Successfully updated unlisted status for {product_id}: {product_title}')
                 #manual scans will be treated as update scans
                 else:
@@ -687,29 +699,30 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         if existing_developer != developer or existing_publisher != publisher:
                             if developer is not None and publisher is not None and developer != '' and publisher != '':
                                 logger.info(f'PQ >>> Developer/publisher is out of date for {product_id}. Updating...')
-                                db_cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, '
-                                                  'gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
-                                                  (developer, publisher, developer_fk, publisher_fk, dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
-                                db_connection.commit()
+                                with db_lock:
+                                    db_cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, '
+                                                      'gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
+                                                      (developer, publisher, developer_fk, publisher_fk, dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
+                                    db_connection.commit()
                                 logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}.')
                             else:
                                 #only log warning and update if the developer/publisher null status has just changed from false to true
                                 if existing_dev_pub_null == 'false':
                                     logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values.')
-                                    
-                                    db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
-                                               (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
-                                    db_connection.commit()
+                                    with db_lock:
+                                        db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
+                                                          (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
+                                        db_connection.commit()
                                     logger.info(f'PQ ~~~ Successfully set developer/publisher null status for {product_id}: {product_title}.')
                                     
                         #should only happen rarely, but the developer/publisher null status should be reset nevertheless
                         elif existing_developer == developer and existing_publisher == publisher and existing_dev_pub_null == 'true':
                             if developer is not None and publisher is not None and developer != '' and publisher != '':
                                 logger.info(f'PQ >>> Current developer/publisher for {product_id} is valid, but null status is set. Resetting...')
-                                
-                                db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
-                                            (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
-                                db_connection.commit()
+                                with db_lock:
+                                    db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
+                                                      (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
+                                    db_connection.commit()
                                 logger.info(f'PQ ~~~ Successfully reset developer/publisher null status for {product_id}: {product_title}.')
                         
                         if existing_full_json != json_pretty:
@@ -731,8 +744,9 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                             #remove gp_id from initial position
                             del values_pretty[5]
                             #ideally this should be a tuple, but the values_pretty list will work just fine
-                            db_cursor.execute(UPDATE_ID_QUERY, values_pretty)
-                            db_connection.commit()
+                            with db_lock:
+                                db_cursor.execute(UPDATE_ID_QUERY, values_pretty)
+                                db_connection.commit()
                             logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
                             
         #existing ids return a 404 HTTP error code on removal
@@ -744,8 +758,9 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             #only alter the entry of not already marked as no longer listed
             if current_no_longer_listed is None:
                 logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
-                db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', (datetime.now(), product_id))
-                db_connection.commit()
+                with db_lock:
+                    db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', (datetime.now(), product_id))
+                    db_connection.commit()
                 logger.info(f'PQ --- Updated the DB entry for: {product_id}.')
             else:
                 #force a retry scan if in archive mode
@@ -755,7 +770,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     logger.debug(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
                     
         #unmapped ids will also return a 404 HTTP error code
-        elif (scan_mode == 'manual' or scan_mode == 'removed' or scan_mode == 'third_party') and response.status_code == 404:
+        elif (scan_mode == 'full' or scan_mode == 'manual' or scan_mode == 'removed' or scan_mode == 'third_party') and response.status_code == 404:
             logger.debug(f'PQ >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
         
         else:
@@ -968,6 +983,106 @@ def gog_files_extract_parser(db_connection, product_id):
     #batch commit
     db_connection.commit()
 
+def gog_products_bulk_query(product_id, product_ids_string, scan_mode, session, db_connection):
+    
+    bulk_products_url = f'https://api.gog.com/products?ids={product_ids_string}'
+    
+    try:
+        response = session.get(bulk_products_url, timeout=HTTP_TIMEOUT)
+        
+        logger.debug(f'BQ >>> HTTP response code: {response.status_code}.')
+        
+        if response.status_code == 200 and response.text != '[]':
+            logger.info(f'BQ >>> Found something in the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range...')
+            
+            json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
+            
+            for line in json_parsed:
+                current_product_id = line['id']
+                retries_complete = False
+                retry_counter = 0
+                    
+                while not retries_complete:
+                    if retry_counter > 0:
+                        logger.warning(f'BQ >>> Reprocessing id {current_product_id}...')
+                        #allow a short respite before re-processing
+                        sleep(2)
+                    
+                    retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
+                    
+                    if retries_complete:
+                        if retry_counter > 1:
+                            logger.info(f'BQ >>> Succesfully retried for {current_product_id}.')
+                    else:
+                        retry_counter += 1
+        
+        #this should not be handled as an exception, as it's the default behavior when nothing is detected
+        elif response.status_code == 200 and response.text == '[]':
+            logger.debug('BQ >>> A blank list entry ("[]") received.')
+        
+        else:
+            logger.warning(f'BQ >>> HTTP error code {response.status_code} received for the {product_id} '
+                           f'<-> {product_id + IDS_IN_BATCH - 1} range.')
+            raise Exception()
+                
+        return True
+    
+    except:
+        logger.debug(f'BQ >>> Products bulk query has failed for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+        #uncomment for debugging purposes only
+        #raise
+        
+        return False
+            
+def worker_thread(thread_number):
+    global terminate_signal
+    
+    threadConfigParser = ConfigParser()
+        
+    with requests.Session() as threadSession:
+        with sqlite3.connect(db_file_full_path) as thread_db_connection:
+            while not terminate_signal:
+                product_id, product_ids_string, scan_mode = queue.get()
+                
+                retry_counter = 0
+                retries_complete = False
+                
+                while not retries_complete and not terminate_signal:
+                    if retry_counter > 0:
+                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        if retry_counter > RETRY_COUNT:
+                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')
+                            terminate_signal = True
+                            break
+                    
+                        logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
+                        #main iternation incremental sleep
+                        sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
+                    
+                    retries_complete = gog_products_bulk_query(product_id, product_ids_string, 
+                                                                scan_mode, threadSession, thread_db_connection)
+                    
+                    if retries_complete:
+                        if retry_counter > 0:
+                            logger.info(f'T#{thread_number} >>> Succesfully retried for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+                    else:
+                        retry_counter += 1
+                    
+                if not terminate_signal and product_id != 0 and product_id % ID_SAVE_INTERVAL == 0:
+                    with config_lock:
+                        threadConfigParser.read(conf_file_full_path)
+                        threadConfigParser['FULL_SCAN']['start_id'] = str(product_id)
+                        
+                        with open(conf_file_full_path, 'w') as file:
+                            threadConfigParser.write(file)
+                            
+                        logger.info(f'T#{thread_number} >>> Processed up to id: {product_id}...')
+                
+                queue.task_done()
+
+            logger.debug('Running PRAGMA optimize...')
+            thread_db_connection.execute(OPTIMIZE_QUERY)
+            
 ##main thread start
 
 #added support for optional command-line parameter mode switching
@@ -977,6 +1092,7 @@ parser = argparse.ArgumentParser(description=('GOG products scan (part of gog_vi
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-n', '--new', help='Query new products', action='store_true')
 group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
+group.add_argument('-f', '--full', help='Perform a full products scan', action='store_true')
 group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
 group.add_argument('-t', '--third_party', help='Perform a third-party (Adalia Fundamentals) products scan', action='store_true')
 group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
@@ -996,6 +1112,9 @@ try:
     scan_mode = configParser['GENERAL']['scan_mode']
     #parsing constants
     HTTP_TIMEOUT = int(configParser['GENERAL']['http_timeout'])
+    RETRY_COUNT = int(configParser['GENERAL']['retry_count'])
+    RETRY_SLEEP_INTERVAL = int(configParser['GENERAL']['retry_sleep_interval'])
+    RETRY_AMPLIFICATION_FACTOR = int(configParser['GENERAL']['retry_amplification_factor'])
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise Exception()
@@ -1008,6 +1127,8 @@ if len(argv) > 1:
         scan_mode = 'new'
     elif args.update:
         scan_mode = 'update'
+    elif args.full:
+        scan_mode = 'full'
     elif args.manual:
         scan_mode = 'manual'
     elif args.third_party:
@@ -1041,8 +1162,86 @@ if db_backup == 'true' or db_backup == scan_mode:
         #subprocess.run(['python', 'gog_create_db.py'])
         logger.critical('Could find specified DB file!')
         raise Exception()
+    
+if scan_mode == 'full':
+    logger.info('--- Running in FULL scan mode ---')
+    
+    #catch SIGTERM and exit gracefully
+    signal.signal(signal.SIGTERM, sigterm_handler)
+    
+    #theads sync (on exit) timeout interval (seconds)
+    THREAD_SYNC_TIMEOUT = 30
+    
+    ID_SAVE_INTERVAL = int(configParser['FULL_SCAN']['id_save_interval'])
+    #50 is the max id batch size allowed by the bulk products API 
+    IDS_IN_BATCH = int(configParser['FULL_SCAN']['ids_in_batch'])
+    #number of active connection threads
+    CONNECTION_THREADS = int(configParser['FULL_SCAN']['connection_threads'])
+    #stop_id = 2147483647, in order to scan the full range,
+    #stopping at the upper limit of a 32 bit signed integer type
+    stop_id = int(configParser['FULL_SCAN']['stop_id'])
+
+    try:
+        product_id = int(configParser['FULL_SCAN']['start_id'])
+        #reduce starting point by a batch to account for any thread overlap
+        if product_id > ID_SAVE_INTERVAL:
+            product_id -= ID_SAVE_INTERVAL
+        logger.info(f'Restarting scan from id: {product_id}.')
+    except:
+        product_id = 0
+    
+    queue = Queue(CONNECTION_THREADS * 2)
+    
+    try:
+        for thread_no in range(CONNECTION_THREADS):
+            #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
+            if CONNECTION_THREADS > 9 and thread_no < 9:
+                THREAD_LOGGING_FILLER = '0'
+            else:
+                THREAD_LOGGING_FILLER = ''
+            
+            thread_no_nice = ''.join((THREAD_LOGGING_FILLER, str(thread_no + 1)))
+            
+            logger.info(f'Starting thread T#{thread_no_nice}...')
+            #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
+            thread = threading.Thread(target=worker_thread, args=(thread_no_nice, ), daemon=True)
+            thread.start()
+    
+        while not terminate_signal and product_id <= stop_id:
+            #generate a string of comma separated ids in the current batch
+            product_ids_string = ','.join([str(product_id_value) for product_id_value in range(product_id, product_id + IDS_IN_BATCH)])
+            logger.debug(f'Processing the following product_id string batch: {product_ids_string}.')
+            #will block by default if the queue is full
+            queue.put((product_id, product_ids_string, scan_mode))
+            product_id += IDS_IN_BATCH
+                
+        #simulate a regular keyboard stop when stop_id is reached
+        if product_id > stop_id:
+            logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+            
+            #write the stop_id as the start_id in the config file
+            configParser.read(conf_file_full_path)
+            configParser['FULL_SCAN']['start_id'] = str(product_id)
+                    
+            with open(conf_file_full_path, 'w') as file:
+                configParser.write(file)
+                
+            raise KeyboardInterrupt
+                
+    except KeyboardInterrupt:
+        terminate_signal = True
+        terminate_sync_counter = 0
         
-if scan_mode == 'update':
+        logger.info('Waiting for all threads to complete...')
+        #sleep until all threads except the main thread finish processing
+        while threading.activeCount() > 1 and terminate_sync_counter <= THREAD_SYNC_TIMEOUT:
+            sleep(1)
+            terminate_sync_counter += 1
+        
+        if terminate_sync_counter > THREAD_SYNC_TIMEOUT:
+            logger.warn('Thread sync on exit interval exceeded! Any stuck threads will now be terminated.')
+        
+elif scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
     
     last_id = int(configParser['UPDATE_SCAN']['last_id'])
