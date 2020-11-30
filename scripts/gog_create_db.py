@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.70
-@date: 28/10/2020
+@version: 2.00
+@date: 22/11/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -25,110 +25,109 @@ logger.addHandler(logger_file_handler)
 db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
-CREATE_GOG_COMPANIES_QUERY = ('CREATE TABLE gog_companies(gc_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
-                                'gc_int_added TEXT NOT NULL, '
-                                'gc_int_no_longer_listed TEXT, '
-                                'gc_name TEXT UNIQUE NOT NULL)')
+CREATE_GOG_COMPANIES_QUERY = ('CREATE TABLE gog_companies (gc_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                              'gc_int_added TEXT NOT NULL, '
+                              'gc_int_delisted TEXT, '
+                              'gc_name TEXT UNIQUE NOT NULL)')
 
-CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products(gp_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
-                                'gp_int_added TEXT NOT NULL, '
-                                'gp_int_previous_update TEXT, '
-                                'gp_int_no_longer_listed TEXT, '
-                                'gp_int_dev_pub_null TEXT NOT NULL, '
-                                'gp_int_latest_update TEXT, '
-                                'gp_int_is_movie TEXT NOT NULL, '
-                                'gp_int_previous_full_json_payload TEXT, '
-                                'gp_int_full_json_payload TEXT NOT NULL, '
-                                'gp_id INTEGER UNIQUE NOT NULL, '
-                                'gp_title TEXT, '
-                                'gp_slug TEXT NOT NULL, '
-                                'gp_developer TEXT, '
-                                'gp_publisher TEXT, '
-                                'gp_developer_fk INTEGER, '
-                                'gp_publisher_fk INTEGER, '
-                                'gp_cs_compat_windows TEXT NOT NULL, '
-                                'gp_cs_compat_osx TEXT NOT NULL, '
-                                'gp_cs_compat_linux TEXT NOT NULL, '
-                                'gp_languages TEXT NOT NULL, '
-                                'gp_links_forum TEXT, '
-                                'gp_links_product_card TEXT, '
-                                'gp_links_purchase_link TEXT, '
-                                'gp_links_support TEXT, '
-                                'gp_in_development_active TEXT NOT NULL, '
-                                'gp_in_development_until TEXT, '
-                                'gp_is_secret TEXT NOT NULL, '
-                                'gp_is_installable TEXT NOT NULL, '
-                                'gp_game_type TEXT NOT NULL, '
-                                'gp_is_pre_order TEXT NOT NULL, '
-                                'gp_release_date TEXT, '
-                                'gp_description_lead TEXT, '
-                                'gp_description_full TEXT, '
-                                'gp_description_cool TEXT, '
-                                'gp_changelog TEXT)') #,
-                                #disable foreign keys, since SQLite support for them is still sketchy
-                                #'FOREIGN KEY(gp_author_fk) REFERENCES gog_companies(gc_int_nr)'
-                                #'FOREIGN KEY(gp_publisher_fk) REFERENCES gog_companies(gc_int_nr))'
+CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                          'gf_int_added TEXT NOT NULL, '
+                          'gf_int_id INTEGER NOT NULL, '
+                          'gf_int_download_type TEXT NOT NULL, '
+                          'gf_id INTEGER NOT NULL, '
+                          'gf_name TEXT NOT NULL, '
+                          'gf_os TEXT, '
+                          'gf_language TEXT, '
+                          'gf_version TEXT, '
+                          'gf_type TEXT, '
+                          'gf_count INTEGER, '
+                          'gf_total_size INTEGER NOT NULL, '
+                          'gf_file_id TEXT NOT NULL, '
+                          'gf_file_size INTEGER NOT NULL)')
 
-CREATE_GOG_PRODUCTS_UNLISTED_QUERY = ('CREATE TABLE gog_products_unlisted(gpu_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
-                                       'gpu_int_added TEXT NOT NULL, '
-                                       'gpu_int_previous_update TEXT, '
-                                       'gpu_int_no_longer_listed TEXT, '
-                                       'gpu_int_dev_pub_null TEXT NOT NULL, '
-                                       'gpu_int_latest_update TEXT, '
-                                       'gpu_int_is_movie TEXT NOT NULL, '
-                                       'gpu_int_previous_full_json_payload TEXT, '
-                                       'gpu_int_full_json_payload TEXT NOT NULL, '
-                                       'gpu_id INTEGER NOT NULL, '
-                                       'gpu_title TEXT, '
-                                       'gpu_slug TEXT NOT NULL, '
-                                       'gpu_developer TEXT, '
-                                       'gpu_publisher TEXT, '
-                                       'gpu_developer_fk INTEGER, '
-                                       'gpu_publisher_fk INTEGER, '
-                                       'gpu_cs_compat_windows TEXT NOT NULL, '
-                                       'gpu_cs_compat_osx TEXT NOT NULL, '
-                                       'gpu_cs_compat_linux TEXT NOT NULL, '
-                                       'gpu_languages TEXT NOT NULL, '
-                                       'gpu_links_forum TEXT, '
-                                       'gpu_links_product_card TEXT, '
-                                       'gpu_links_purchase_link TEXT, '
-                                       'gpu_links_support TEXT, '
-                                       'gpu_in_development_active TEXT NOT NULL, '
-                                       'gpu_in_development_until TEXT, '
-                                       'gpu_is_secret TEXT NOT NULL, '
-                                       'gpu_is_installable TEXT NOT NULL, '
-                                       'gpu_game_type TEXT NOT NULL, '
-                                       'gpu_is_pre_order TEXT NOT NULL, '
-                                       'gpu_release_date TEXT, '
-                                       'gpu_description_lead TEXT, '
-                                       'gpu_description_full TEXT, '
-                                       'gpu_description_cool TEXT, '
-                                       'gpu_changelog TEXT)')
-
-CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files(gf_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
-                            'gf_int_added TEXT NOT NULL, '
-                            'gf_int_product_id INTEGER NOT NULL, '
-                            'gf_int_type TEXT NOT NULL, '
-                            'gf_id INTEGER NOT NULL, '
-                            'gf_name TEXT NOT NULL, '
-                            'gf_os TEXT NOT NULL, '
-                            'gf_language TEXT NOT NULL, '
-                            'gf_version TEXT, '
-                            'gf_total_size INTEGER NOT NULL, '
-                            'gf_file_id TEXT NOT NULL, '
-                            'gf_file_size INTEGER NOT NULL, '
-                            'gf_file_downlink TEXT NOT NULL)')
-
-CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices(gpr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                            'gpr_int_added TEXT NOT NULL, '
-                           'gpr_int_outdated_on TEXT, '
-                           'gpr_id INTEGER NOT NULL, '
-                           'gpr_product_title TEXT, '
-                           'gpr_country_code TEXT NOT NULL, '
+                           'gpr_int_outdated TEXT, '
+                           'gpr_int_id INTEGER NOT NULL, '
+                           'gpr_int_title TEXT, '
+                           'gpr_int_country_code TEXT NOT NULL, '
                            'gpr_currency TEXT NOT NULL, '
                            'gpr_base_price REAL NOT NULL, '
-                           'gpr_final_price REAL NOT NULL, '
-                           'gpr_bonus_wallet_funds REAL)')
+                           'gpr_final_price REAL NOT NULL)')
+
+CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                             'gp_int_added TEXT NOT NULL, '
+                             'gp_int_delisted TEXT, '
+                             'gp_int_updated TEXT, '
+                             'gp_int_json_payload TEXT NOT NULL, '
+                             'gp_int_json_diff TEXT, '
+                             'gp_int_v2_updated TEXT, '
+                             'gp_int_v2_json_payload TEXT, '
+                             'gp_int_v2_json_diff TEXT, '
+                             'gp_int_is_movie INTEGER NOT NULL, '
+                             'gp_v2_developer TEXT, '
+                             'gp_v2_publisher TEXT, '
+                             'gp_v2_tags TEXT, '
+                             'gp_v2_series TEXT, '
+                             'gp_v2_features TEXT, '
+                             'gp_v2_is_using_dosbox INTEGER, '
+                             'gp_id INTEGER UNIQUE NOT NULL, '
+                             'gp_title TEXT, '
+                             'gp_slug TEXT NOT NULL, '
+                             'gp_cs_compat_windows INTEGER NOT NULL, '
+                             'gp_cs_compat_osx INTEGER NOT NULL, '
+                             'gp_cs_compat_linux INTEGER NOT NULL, '
+                             'gp_languages TEXT, '
+                             'gp_links_forum TEXT, '
+                             'gp_links_product_card TEXT, '
+                             'gp_links_support TEXT, '
+                             'gp_in_development INTEGER NOT NULL, '
+                             'gp_is_installable INTEGER NOT NULL, '
+                             'gp_game_type TEXT NOT NULL, '
+                             'gp_is_pre_order INTEGER NOT NULL, '
+                             'gp_release_date TEXT, '
+                             'gp_description_lead TEXT, '
+                             'gp_description_full TEXT, '
+                             'gp_description_cool TEXT, '
+                             'gp_changelog TEXT)')
+
+CREATE_GOG_PRODUCTS_DELISTED_QUERY = ('CREATE TABLE gog_products_delisted (gpd_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                                      'gpd_int_added TEXT NOT NULL, '
+                                      'gpd_int_delisted TEXT, '
+                                      #comment out internal fields that are not relevant 
+                                      #for archival purposes, in order to save some space
+                                      #'gpd_int_updated TEXT, '
+                                      'gpd_int_json_payload TEXT NOT NULL, '
+                                      #'gpd_int_json_diff TEXT, '
+                                      #'gpd_int_v2_updated TEXT, '
+                                      'gpd_int_v2_json_payload TEXT, '
+                                      #'gpd_int_v2_json_diff TEXT, '
+                                      'gpd_int_is_movie INTEGER NOT NULL, '
+                                      'gpd_v2_developer TEXT, '
+                                      'gpd_v2_publisher TEXT, '
+                                      'gpd_v2_tags TEXT, '
+                                      'gpd_v2_series TEXT, '
+                                      'gpd_v2_features TEXT, '
+                                      'gpd_v2_is_using_dosbox INTEGER, '
+                                      'gpd_id INTEGER NOT NULL, '
+                                      'gpd_title TEXT, '
+                                      'gpd_slug TEXT NOT NULL, '
+                                      'gpd_cs_compat_windows INTEGER NOT NULL, '
+                                      'gpd_cs_compat_osx INTEGER NOT NULL, '
+                                      'gpd_cs_compat_linux INTEGER NOT NULL, '
+                                      'gpd_languages, '
+                                      'gpd_links_forum TEXT, '
+                                      'gpd_links_product_card TEXT, '
+                                      'gpd_links_support TEXT, '
+                                      'gpd_in_development INTEGER NOT NULL, '
+                                      'gpd_is_installable INTEGER NOT NULL, '
+                                      'gpd_game_type TEXT NOT NULL, '
+                                      'gpd_is_pre_order INTEGER NOT NULL, '
+                                      'gpd_release_date TEXT, '
+                                      'gpd_description_lead TEXT, '
+                                      'gpd_description_full TEXT, '
+                                      'gpd_description_cool TEXT, '
+                                      'gpd_changelog TEXT)')
 
 ##main thread start
 
@@ -146,11 +145,12 @@ if not path.exists(db_file_full_path):
         db_cursor = db_connection.cursor()
         db_cursor.execute(CREATE_GOG_COMPANIES_QUERY)
         db_cursor.execute(CREATE_GOG_FILES_QUERY)
+        db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
         db_cursor.execute(CREATE_GOG_PRICES_QUERY)
+        db_cursor.execute('CREATE INDEX gpr_int_id_index ON gog_prices (gpr_int_id)')
         db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
-        db_cursor.execute(CREATE_GOG_PRODUCTS_UNLISTED_QUERY)
-        db_cursor.execute('CREATE INDEX gf_int_product_id_index ON gog_files (gf_int_product_id)')
-        db_cursor.execute('CREATE INDEX gpr_id_index ON gog_prices (gpr_id)')
+        db_cursor.execute(CREATE_GOG_PRODUCTS_DELISTED_QUERY)
+        db_cursor.execute('CREATE INDEX gpd_id_index ON gog_products_delisted (gpd_id)')
         db_connection.commit()
     
     logger.info('DB created successfully.')

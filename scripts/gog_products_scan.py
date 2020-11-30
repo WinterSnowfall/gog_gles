@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 1.90
-@date: 05/11/2020
+@version: 2.00
+@date: 22/11/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -15,6 +15,8 @@ import signal
 import requests
 import logging
 import argparse
+import difflib
+import re
 from sys import argv
 from shutil import copy2
 from configparser import ConfigParser
@@ -26,6 +28,8 @@ from queue import Queue
 from collections import OrderedDict
 from lxml import html as lhtml
 from logging.handlers import RotatingFileHandler
+#uncomment for debugging purposes only
+#import traceback
 
 ##global parameters init
 configParser = ConfigParser()
@@ -52,126 +56,109 @@ db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
 ##CONSTANTS
 INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
-UPDATE_ID_QUERY =  ('UPDATE gog_products SET gp_int_previous_update = ?, '
-                        'gp_int_latest_update = ?, '
-                        'gp_int_no_longer_listed = ?, '
-                        'gp_int_previous_full_json_payload = ?, '
-                        'gp_int_full_json_payload = ?, '
-                        'gp_title = ?, '
-                        'gp_slug = ?, '
-                        'gp_cs_compat_windows = ?, '
-                        'gp_cs_compat_osx = ?, '
-                        'gp_cs_compat_linux = ?, '
-                        'gp_languages = ?, '
-                        'gp_links_forum = ?, '
-                        'gp_links_product_card = ?, '
-                        'gp_links_purchase_link = ?, '
-                        'gp_links_support = ?, '
-                        'gp_in_development_active = ?, '
-                        'gp_in_development_until = ?, '
-                        'gp_is_secret = ?, '
-                        'gp_is_installable = ?, '
-                        'gp_game_type = ?, '
-                        'gp_is_pre_order = ?, '
-                        'gp_release_date = ?, '
-                        'gp_description_lead = ?, '
-                        'gp_description_full = ?, '
-                        'gp_description_cool = ?, '
-                        'gp_changelog = ? WHERE gp_id = ?')
+UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
+                   'gp_int_json_payload = ?, '
+                   'gp_int_json_diff = ?, '
+                   'gp_title = ?, '
+                   'gp_slug = ?, '
+                   'gp_cs_compat_windows = ?, '
+                   'gp_cs_compat_osx = ?, '
+                   'gp_cs_compat_linux = ?, '
+                   'gp_languages = ?, '
+                   'gp_links_forum = ?, '
+                   'gp_links_product_card = ?, '
+                   'gp_links_support = ?, '
+                   'gp_in_development = ?, '
+                   'gp_is_installable = ?, '
+                   'gp_game_type = ?, '
+                   'gp_is_pre_order = ?, '
+                   'gp_release_date = ?, '
+                   'gp_description_lead = ?, '
+                   'gp_description_full = ?, '
+                   'gp_description_cool = ?, '
+                   'gp_changelog = ? WHERE gp_id = ?')
 
-COMPANY_SELECT_FILTER_QUERY = ('SELECT gc_int_nr FROM gog_companies WHERE '
-                                'upper('
-                                    'replace('
-                                        'replace('
-                                            'replace('
-                                                'replace('
-                                                    'replace('
-                                                        'replace(gc_name,".",""),'
-                                                    '":",""),'
-                                                '"/ ",""),'
-                                            '", ",""),'
-                                        '"/",""),'
-                                    '",","")'
-                                ') = ?')
+UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
+                      'gp_int_v2_json_payload = ?, '
+                      'gp_int_v2_json_diff = ?, '
+                      'gp_v2_developer = ?, '
+                      'gp_v2_publisher = ?, '
+                      'gp_v2_tags = ?, '
+                      'gp_v2_series = ?, '
+                      'gp_v2_features = ?, '
+                      'gp_v2_is_using_dosbox = ? WHERE gp_id = ?')
 
-ARCHIVE_UNLISTED_ID_QUERY = ('INSERT INTO gog_products_unlisted (gpu_int_added, '
-                                                                'gpu_int_previous_update, '
-                                                                'gpu_int_no_longer_listed, '
-                                                                'gpu_int_dev_pub_null, '
-                                                                'gpu_int_latest_update, '
-                                                                'gpu_int_is_movie, '
-                                                                'gpu_int_previous_full_json_payload, '
-                                                                'gpu_int_full_json_payload, '
-                                                                'gpu_id, '
-                                                                'gpu_title, '
-                                                                'gpu_slug, '
-                                                                'gpu_developer, '
-                                                                'gpu_publisher, '
-                                                                'gpu_developer_fk, '
-                                                                'gpu_publisher_fk, ' 
-                                                                'gpu_cs_compat_windows, '
-                                                                'gpu_cs_compat_osx, '
-                                                                'gpu_cs_compat_linux, '
-                                                                'gpu_languages, '
-                                                                'gpu_links_forum, '
-                                                                'gpu_links_product_card, '
-                                                                'gpu_links_purchase_link, '
-                                                                'gpu_links_support, ' 
-                                                                'gpu_in_development_active, '
-                                                                'gpu_in_development_until, '
-                                                                'gpu_is_secret, '
-                                                                'gpu_is_installable, '
-                                                                'gpu_game_type, '
-                                                                'gpu_is_pre_order, '
-                                                                'gpu_release_date, '
-                                                                'gpu_description_lead, '
-                                                                'gpu_description_full, '
-                                                                'gpu_description_cool, '
-                                                                'gpu_changelog) '
-                                                         'SELECT gp_int_added, '
-                                                                'gp_int_previous_update, '
-                                                                'gp_int_no_longer_listed, '
-                                                                'gp_int_dev_pub_null, '
-                                                                'gp_int_latest_update, '
-                                                                'gp_int_is_movie, '
-                                                                #to save some space, blank out the previous JSON information from 
-                                                                #the archived id - NULL instead of gp_int_previous_full_json_payload
-                                                                'NULL, '
-                                                                'gp_int_full_json_payload, '
-                                                                'gp_id, '
-                                                                'gp_title, '
-                                                                'gp_slug, '
-                                                                'gp_developer, '
-                                                                'gp_publisher, '
-                                                                'gp_developer_fk, '
-                                                                'gp_publisher_fk, '
-                                                                'gp_cs_compat_windows, '
-                                                                'gp_cs_compat_osx, '
-                                                                'gp_cs_compat_linux, '
-                                                                'gp_languages, '
-                                                                'gp_links_forum, '
-                                                                'gp_links_product_card, '
-                                                                'gp_links_purchase_link, '
-                                                                'gp_links_support, '
-                                                                'gp_in_development_active, '
-                                                                'gp_in_development_until, '
-                                                                'gp_is_secret, '
-                                                                'gp_is_installable, '
-                                                                'gp_game_type, '
-                                                                'gp_is_pre_order, '
-                                                                'gp_release_date, '
-                                                                'gp_description_lead, '
-                                                                'gp_description_full, '
-                                                                'gp_description_cool, '
-                                                                'gp_changelog '
-                                                         'FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL AND gp_id = ?')
+ARCHIVE_DELISTED_ID_QUERY = ('INSERT INTO gog_products_delisted (gpd_int_added, '
+                             'gpd_int_delisted, '
+                             'gpd_int_json_payload, '
+                             'gpd_int_v2_json_payload, '
+                             'gpd_int_is_movie, '
+                             'gpd_v2_developer, '
+                             'gpd_v2_publisher, '
+                             'gpd_v2_tags, '
+                             'gpd_v2_series, '
+                             'gpd_v2_features, '
+                             'gpd_v2_is_using_dosbox, '
+                             'gpd_id, '
+                             'gpd_title, '
+                             'gpd_slug, '
+                             'gpd_cs_compat_windows, '
+                             'gpd_cs_compat_osx, '
+                             'gpd_cs_compat_linux, '
+                             'gpd_languages, '
+                             'gpd_links_forum, '
+                             'gpd_links_product_card, '
+                             'gpd_links_support, ' 
+                             'gpd_in_development, '
+                             'gpd_is_installable, '
+                             'gpd_game_type, '
+                             'gpd_is_pre_order, '
+                             'gpd_release_date, '
+                             'gpd_description_lead, '
+                             'gpd_description_full, '
+                             'gpd_description_cool, '
+                             'gpd_changelog) '
+                             'SELECT gp_int_added, '
+                             'gp_int_delisted, '
+                             'gp_int_json_payload, '
+                             'gp_int_v2_json_payload, '
+                             'gp_int_is_movie, '
+                             'gp_v2_developer, '
+                             'gp_v2_publisher, '
+                             'gp_v2_tags, '
+                             'gp_v2_series, '
+                             'gp_v2_features, '
+                             'gp_v2_is_using_dosbox, '
+                             'gp_id, '
+                             'gp_title, '
+                             'gp_slug, '
+                             'gp_cs_compat_windows, '
+                             'gp_cs_compat_osx, '
+                             'gp_cs_compat_linux, '
+                             'gp_languages, '
+                             'gp_links_forum, '
+                             'gp_links_product_card, '
+                             'gp_links_support, '
+                             'gp_in_development, '
+                             'gp_is_installable, '
+                             'gp_game_type, '
+                             'gp_is_pre_order, '
+                             'gp_release_date, '
+                             'gp_description_lead, '
+                             'gp_description_full, '
+                             'gp_description_cool, '
+                             'gp_changelog '
+                             'FROM gog_products WHERE gp_id = ? AND gp_int_delisted IS NOT NULL')
 
-INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
 
 ADALIA_MISSING_URL = 'https://gog.bigpizzapies.com/missingUrls.json'
 ADALIA_LEGACY_URL = 'https://gog.bigpizzapies.com/legacyUrls.json'
+#number of retries after which an id is considered parmenently delisted (for archive mode)
+ARCHIVE_NO_OF_RETRIES = 3
+TWO_OR_MORE_ENDLINES_REGEX = '([ ]*[\n]){2,}'
 
 #set the gog_lc cookie to avoid errors bought about by GOG dynamically determining the site language
 COOKIES = {
@@ -183,274 +170,10 @@ def sigterm_handler(signum, frame):
     
     raise SystemExit(0)
 
-def gog_process_json_payload(json_payload):
-    values_pretty = [json.dumps(item, sort_keys=True, ensure_ascii=False) for item in json_payload.values()]
+def gog_product_company_query(product_id, session, db_connection, product_url):
     
-    #uncomment for debugging of JSON payload
-    #for item in values_pretty:
-    #   logger.debug(item)
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload:
-        [0]  - id
-        [1]  - title
-        [2]  - purchase_link
-        [3]  - slug
-        [4]  - content_system_compatibility
-        [5]  - languages
-        [6]  - links
-        [7]  - in_development
-        [8]  - is_secret
-        [9]  - is_installable
-        [10] - game_type
-        [11] - is_pre_order
-        [12] - release_date
-        [13] - images
-        [14] - dlcs
-        [15] - downloads
-        [16] - expanded_dlcs
-        [17] - description
-        [18] - screenshots
-        [19] - videos
-        [20] - related_products
-        [21] - changelog
-    '''
-    
-    #remove values which will not be stored explicitly in the database:
-    del values_pretty[20] #related_products
-    del values_pretty[19] #videos
-    del values_pretty[18] #screenshots
-    del values_pretty[16] #expanded_dlcs
-    del values_pretty[15] #downloads
-    del values_pretty[14] #dlcs
-    del values_pretty[13] #images
-    del values_pretty[2]  #purchase_link
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after removals):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - content_system_compatibility
-        [4]  - languages
-        [5]  - links
-        [6]  - in_development
-        [7]  - is_secret
-        [8]  - is_installable
-        [9]  - game_type
-        [10] - is_pre_order
-        [11] - release_date
-        [12] - description             
-        [13] - changelog
-    '''
-    
-    #process content_system_compatibility
-    content_system_compatibility = json.loads(values_pretty[3])
-    del values_pretty[3]
-    cs_compat_windows = json.dumps(content_system_compatibility['windows'], ensure_ascii=False)
-    cs_compat_osx = json.dumps(content_system_compatibility['osx'], ensure_ascii=False)
-    cs_compat_linux = json.dumps(content_system_compatibility['linux'], ensure_ascii=False)
-    values_pretty.insert(3, cs_compat_windows)
-    values_pretty.insert(4, cs_compat_osx)
-    values_pretty.insert(5, cs_compat_linux)
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after content_system_compatibility):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - cs_compat_windows
-        [4]  - cs_compat_osx
-        [5]  - cs_compat_linux
-        [6]  - languages
-        [7]  - links
-        [8]  - in_development
-        [9]  - is_secret
-        [10] - is_installable
-        [11] - game_type
-        [12] - is_pre_order
-        [13] - release_date
-        [14] - description             
-        [15] - changelog
-    '''
-    #process languages
-    languages = json.loads(values_pretty[6])
-    del values_pretty[6]
-    languages_processed = json.dumps(languages, ensure_ascii=False)
-    #remove list headers, at they are not needed in the DB table
-    languages_processed = languages_processed.replace('{','').replace('}', '')
-    values_pretty.insert(6, languages_processed)
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after languages):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - cs_compat_windows
-        [4]  - cs_compat_osx
-        [5]  - cs_compat_linux
-        [6]  - languages_processed
-        [7]  - links
-        [8]  - in_development
-        [9]  - is_secret
-        [10] - is_installable
-        [11] - game_type
-        [12] - is_pre_order
-        [13] - release_date
-        [14] - description             
-        [15] - changelog
-    '''
-    
-    #process links
-    links = json.loads(values_pretty[7])
-    del values_pretty[7]
-    links_forum = json.dumps(links['forum'], ensure_ascii=False)
-    links_product_card = json.dumps(links['product_card'], ensure_ascii=False)
-    links_purchase_link = json.dumps(links['purchase_link'], ensure_ascii=False)
-    links_support = json.dumps(links['support'], ensure_ascii=False)
-    values_pretty.insert(7, links_forum)
-    values_pretty.insert(8, links_product_card)
-    values_pretty.insert(9, links_purchase_link)
-    values_pretty.insert(10, links_support)
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after links):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - cs_compat_windows
-        [4]  - cs_compat_osx
-        [5]  - cs_compat_linux
-        [6]  - languages_processed
-        [7]  - links_forum
-        [8]  - links_product_card
-        [9]  - links_purchase_link
-        [10] - links_support
-        [11] - in_development
-        [12] - is_secret
-        [13] - is_installable
-        [14] - game_type
-        [15] - is_pre_order
-        [16] - release_date
-        [17] - description             
-        [18] - changelog
-    '''
+    logger.debug(f'CQ >>> Querying url: {product_url}.')
         
-    #process in_development
-    in_development = json.loads(values_pretty[11])
-    del values_pretty[11]
-    in_development_active = json.dumps(in_development['active'], ensure_ascii=False)
-    in_development_until = json.dumps(in_development['until'], ensure_ascii=False)
-    values_pretty.insert(11, in_development_active)
-    values_pretty.insert(12, in_development_until)
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after in_development):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - cs_compat_windows
-        [4]  - cs_compat_osx
-        [5]  - cs_compat_linux
-        [6]  - languages_processed
-        [7]  - links_forum
-        [8]  - links_product_card
-        [9]  - links_purchase_link
-        [10] - links_support
-        [11] - in_development_active
-        [12] - in_development_until
-        [13] - is_secret
-        [14] - is_installable
-        [15] - game_type
-        [16] - is_pre_order
-        [17] - release_date
-        [18] - description             
-        [19] - changelog
-    '''
-    
-    #process description
-    description = json.loads(values_pretty[-2])
-    del values_pretty[-2]
-    description_lead = html2text(json.dumps(description['lead'], ensure_ascii=False).replace('\\n', '\n')).strip()
-    description_full = html2text(json.dumps(description['full'], ensure_ascii=False).replace('\\n', '\n')).strip()
-    description_cool = html2text(json.dumps(description['whats_cool_about_it'], ensure_ascii=False).replace('\\n', '\n')).strip()
-    values_pretty.insert(-1, description_lead)
-    values_pretty.insert(-1, description_full)
-    values_pretty.insert(-1, description_cool)
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - cs_compat_windows
-        [4]  - cs_compat_osx
-        [5]  - cs_compat_linux
-        [6]  - languages_processed
-        [7]  - links_forum
-        [8]  - links_product_card
-        [9]  - links_purchase_link
-        [10] - links_support
-        [11] - in_development_active
-        [12] - in_development_until
-        [13] - is_secret
-        [14] - is_installable
-        [15] - game_type
-        [16] - is_pre_order
-        [17] - release_date
-        [18] - description_lead
-        [19] - description_full
-        [20] - description_cool
-        [21] - changelog
-    '''
-    
-    #process changelog
-    changelog = values_pretty[-1]
-    del values_pretty[-1]
-    changelog_text = html2text(changelog.replace('\\n', '')).strip()
-    #correct some html2text wierdness by removing whitespace via indexes
-    values_pretty.append(changelog_text[3:-2])
-    
-    '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
-        [0]  - id
-        [1]  - title
-        [2]  - slug
-        [3]  - cs_compat_windows
-        [4]  - cs_compat_osx
-        [5]  - cs_compat_linux
-        [6]  - languages_processed
-        [7]  - links_forum
-        [8]  - links_product_card
-        [9]  - links_purchase_link
-        [10] - links_support
-        [11] - in_development_active
-        [12] - in_development_until
-        [13] - is_secret
-        [14] - is_installable
-        [15] - game_type
-        [16] - is_pre_order
-        [17] - release_date
-        [18] - description_lead
-        [19] - description_full
-        [20] - description_cool
-        [21] - changelog
-    '''
-    
-    #filter regular values by removing double quotes and 'null' values in other 
-    #programming languages in order to store actual 'NULL' in the SQLite database
-    #and remove any trailing or leading whitespace
-    array_index = 0
-    for item in values_pretty:
-        if item is not None:
-            if item == 'null' or item.strip() == '' or item.strip() == '""' or item.strip() == '\'\'':
-                item = None
-            else:
-                #remove JSON enforced double quotes, as they are not needed in the DB
-                #and remove any trailing or leading whitespace
-                item = item.replace('"','').strip() 
-            values_pretty[array_index] = item
-        array_index += 1
-        
-    return values_pretty
-
-def gog_product_company_query(product_id, product_url, session):
-    #convert to https, as some product_card urls can be http-based
-    if product_url.find('http://') != -1:
-        product_url = product_url.replace('http://', 'https://')
-    
     try:
         response = session.get(product_url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
         
@@ -476,22 +199,35 @@ def gog_product_company_query(product_id, product_url, session):
                     logger.debug(f'CQ >>> Found developer raw value: {developer_raw}.')
                     #unescape any potentially remanent HTML notations such as '&amp;'
                     developer = html.unescape(developer_raw.strip())
+                    if developer == '': developer = None
                     
                     publisher_raw = html_tree.xpath('//div[contains(@class, "details__content") and contains(@class, "table__row-content")]'
                                                     '/a[@class="details__link" and contains(@gog-track-event, "eventLabel: \'Publisher:")]/text()')[0]
                     logger.debug(f'CQ >>> Found publisher raw value: {publisher_raw}.')
                     #unescape any potentially remanent HTML notations such as '&amp;'
                     publisher = html.unescape(publisher_raw.strip())
+                    if publisher == '': publisher = None
                     
-                    return (developer, publisher)
+                    db_cursor = db_connection.execute('SELECT gp_v2_developer, gp_v2_publisher, gp_title FROM gog_products WHERE gp_id = ?', (product_id, ))
+                    existing_developer, existing_publisher, product_title = db_cursor.fetchone()
+                    
+                    if existing_developer != developer or existing_publisher != publisher:
+                        if developer is not None and publisher is not None:
+                            logger.info(f'CQ >>> Developer/publisher are outdated for {product_id}. Updating...')
+                            with db_lock:
+                                db_cursor.execute('UPDATE gog_products SET gp_v2_developer = ?, gp_v2_publisher = ? WHERE gp_id = ?', 
+                                                  (developer, publisher, product_id))
+                                db_connection.commit()
+                            logger.info(f'CQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}.')
+                        else:
+                            logger.warning(f'CQ >>> Null developer/publisher values returned for {product_id}. Keeping existing values...')
+                    
                 else:
                     logger.debug('CQ >>> Unable to find a valid company div section. Perhaps the product is no longer being sold?')
-                    return (None, None)
             
             #invalid product URLs will redirect to the GOG games page
             else:
                 logger.debug('CQ >>> Product URL has been redirected to the GOG games page. Perhaps the product is no longer being sold?')
-                return (None, None)
         
         else:
             logger.warning(f'CQ >>> HTTP error code {response.status_code} received for {product_id}.')
@@ -499,6 +235,87 @@ def gog_product_company_query(product_id, product_url, session):
         
     except:
         logger.debug(f'CQ >>> Product company query has failed for {product_id}.')
+        #uncomment for debugging purposes only
+        #logger.error(traceback.format_exc())
+        raise
+
+def gog_product_v2_query(product_id, session, db_connection):
+    
+    product_url = f'https://api.gog.com/v2/games/{product_id}?locale=en-US'
+        
+    try:
+        response = session.get(product_url, timeout=HTTP_TIMEOUT)
+        
+        logger.debug(f'2Q >>> HTTP response code: {response.status_code}.')
+        
+        if response.status_code == 200:
+            logger.debug(f'2Q >>> Product v2 query for id {product_id} has returned a valid response...')
+            
+            json_v2_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
+            json_v2_formatted = json.dumps(json_v2_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
+            
+            db_cursor = db_connection.execute('SELECT gp_int_v2_json_payload FROM gog_products WHERE gp_id = ?', (product_id, ))
+            existing_v2_json_formatted = db_cursor.fetchone()[0]
+            
+            if existing_v2_json_formatted != json_v2_formatted:
+                if existing_v2_json_formatted is not None:
+                    logger.info(f'2Q >>> Existing v2 data for {product_id} is outdated. Updating...')
+                
+                #calculate the diff between the new json and the previous one
+                #(applying the diff on the new json will revert to the previous version)
+                if existing_v2_json_formatted is not None:
+                    diff_v2_formatted = ''
+                    for line in difflib.unified_diff(json_v2_formatted.splitlines(1), existing_v2_json_formatted.splitlines(1), n=0):
+                        diff_v2_formatted = ''.join((diff_v2_formatted, line))
+                else:
+                    diff_v2_formatted = None
+                    
+                #process product title (for loggers)
+                product_title = json_v2_parsed['_embedded']['product']['title']
+                #process developer/publisher
+                developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
+                publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
+                #process tags
+                tags = ', '.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
+                if tags == '': tags = None
+                #process series - these may be 'null' and return a TypeError in such cases
+                try:
+                    series = json_v2_parsed['_embedded']['series']['name']
+                except TypeError:
+                    series = None
+                #process features
+                features = ', '.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
+                if features == '': features = None
+                #process is_using_dosbox
+                is_using_dosbox = json_v2_parsed['isUsingDosBox']
+                
+                with db_lock:
+                    #remove title from the first position in values_formatted and add the id at the end
+                    #gp_int_v2_latest_update, gp_int_v2_json_payload, gp_int_v2_previous_json_diff,
+                    #gp_v2_developer, gp_v2_publisher, gp_v2_tags, gp_vs_series,
+                    #gp_v2_features, gp_v2_is_using_dosbox, gp_id (WHERE clause)
+                    db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now(), json_v2_formatted, diff_v2_formatted, 
+                                                           developer, publisher, tags, series, 
+                                                           features, is_using_dosbox, product_id))
+                    db_connection.commit()
+                    
+                if existing_v2_json_formatted is not None:
+                    logger.info(f'2Q ~~~ Updated the v2 data for {product_id}: {product_title}.')
+                else:
+                    logger.info(f'2Q +++ Added v2 data for {product_id}: {product_title}.')
+        
+        #ids corresponding to movies will return a 404 error, others should not
+        elif response.status_code == 404:
+            logger.warning(f'2Q >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
+        
+        else:
+            logger.warning(f'2Q >>> HTTP error code {response.status_code} received for {product_id}.')
+            raise Exception()
+        
+    except:
+        logger.debug(f'2Q >>> Product company query has failed for {product_id}.')
+        #uncomment for debugging purposes only
+        #logger.error(traceback.format_exc())
         raise
     
 def gog_product_extended_query(product_id, scan_mode, session, db_connection):
@@ -514,163 +331,112 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             if scan_mode == 'full':
                 logger.info(f'PQ >>> Product query for id {product_id} has returned a valid response...')
             
-            json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
-            
-            json_pretty = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
-            values_pretty = gog_process_json_payload(json_parsed)
-            
             db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', (product_id, ))
             entry_count = db_cursor.fetchone()[0]
             
-            #no need to do any advanced processing if an entry is found in 'full' scan mode,
+            re_compiled = re.compile(TWO_OR_MORE_ENDLINES_REGEX)
+            #initialize is movie with False
+            is_movie = False
+            
+            #no need to do any processing if an entry is found in 'full' or 'builds' scan modes,
             #since that entry will be skipped anyway
-            if not (entry_count == 1 and scan_mode == 'full'):
-                '''ye' olde indexed map of all primary fields currently returned part of the json payload (after description):
-                    [0]  - id
-                    [1]  - title
-                    [2]  - slug
-                    [3]  - cs_compat_windows
-                    [4]  - cs_compat_osx
-                    [5]  - cs_compat_linux
-                    [6]  - languages_processed
-                    [7]  - links_forum
-                    [8]  - links_product_card
-                    [9]  - links_purchase_link
-                    [10] - links_support
-                    [11] - in_development_active
-                    [12] - in_development_until
-                    [13] - is_secret
-                    [14] - is_installable
-                    [15] - game_type
-                    [16] - is_pre_order
-                    [17] - release_date
-                    [18] - description_lead
-                    [19] - description_full
-                    [20] - description_cool
-                    [21] - changelog
-                '''
+            if not (entry_count == 1 and (scan_mode == 'full' or scan_mode == 'builds')):
+                
+                json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
+                json_formatted = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
+                
+                #process unmodified fields
+                product_id = json_parsed['id']
+                product_title = json_parsed['title']
+                product_slug = json_parsed['slug']
+                #process content_system_compatibility
+                cs_compat_windows = json_parsed['content_system_compatibility']['windows']
+                cs_compat_osx = json_parsed['content_system_compatibility']['osx']
+                cs_compat_linux = json_parsed['content_system_compatibility']['linux']
+                #process languages
+                if len(json_parsed['languages']) > 0:
+                    languages = ', '.join([f'{language_key}: {json_parsed["languages"][language_key]}' 
+                                           for language_key in json_parsed['languages'].keys()])
+                else:
+                    languages = None
+                #process links
+                links_forum = json_parsed['links']['forum']
+                links_product_card = json_parsed['links']['product_card']
+                links_support = json_parsed['links']['support']
+                #process unmodified fields
+                in_development = json_parsed['in_development']['active']
+                is_installable = json_parsed['is_installable']
+                game_type = json_parsed['game_type']
+                is_pre_order = json_parsed['is_pre_order']
+                release_date = json_parsed['release_date']
+                #need to correct some GOG formatting wierdness by using regular expressions
+                #process description
+                try:
+                    description_lead = re_compiled.sub('\n\n', html2text(json_parsed['description']['lead'], bodywidth=0).strip())
+                except AttributeError:
+                    description_lead = None
+                if description_lead == '': description_lead = None
+                try:
+                    description_full = re_compiled.sub('\n\n', html2text(json_parsed['description']['full'], bodywidth=0).strip())
+                except AttributeError:
+                    description_full = None
+                if description_full == '': description_full = None
+                #appears to be treated like a per row input for a HTML list shown on the product webpage
+                try:
+                    description_cool = re_compiled.sub('\n\n', html2text(json_parsed['description']['whats_cool_about_it']
+                                                                         .replace('\n', '<br><br>'), bodywidth=0).strip())
+                except AttributeError:
+                    description_cool = None
+                if description_cool == '': description_cool = None
+                #process changelog
+                try:
+                    changelog = re_compiled.sub('\n\n', html2text(json_parsed['changelog'], bodywidth=0).strip())
+                except AttributeError:
+                    changelog = None
+                if changelog == '': changelog = None
                 
                 #if the API returned product title starts with 'product_title_', keep the existing product title
-                if values_pretty[1] is not None and values_pretty[1].startswith('product_title_'):
+                if product_title is not None and product_title.startswith('product_title_'):
                     logger.warning('PQ >>> Product title update skipped since an invalid value was returned.')
                     db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id, ))
-                    #to be used for all loggers
-                    values_pretty[1] = db_cursor.fetchone()[0]
+                    product_title = db_cursor.fetchone()[0]
                 
-                #to be used for all loggers
-                product_title = values_pretty[1]
-                
-                ##movie detection logic
-                
-                #detect if the entry is a movie based on the content of the lead description field
-                #I know, not very pretty, but hey, it works
-                if values_pretty[18] is not None:
-                    if (values_pretty[18].startswith('IMDB rating:') or
-                       values_pretty[18].startswith('Duration:') or
-                       #fix for Super Game Jam - technically a movie though it provides some games as bonus
-                       values_pretty[18].startswith('**Includes 5 short films & 5 short games.**') or
-                       #fix for Deliverance: The Making of Kingdom Come - may want to think of a more elegant way to do this
-                       values_pretty[18].startswith('Also available:')):
-                        is_movie = 'true'
-                    else:
-                        is_movie = 'false'
-                #when no description is provided, consider the entry a non-movie entry
-                else:
-                    is_movie = 'false'
-                        
-                #be a pessimist by default
-                dev_pub_null = 'true'
-                
-                ##company query call
-                product_card = json_parsed['links']['product_card']
-                if product_card is not None and product_card != '':
-                    developer, publisher = gog_product_company_query(product_id, product_card, session)
-                else:
-                    if scan_mode == 'full' or scan_mode == 'manual':
-                        logger.warning('PQ >>> Product company query skipped since a null product card value was returned.')
-                    developer = None
-                    publisher = None
-                
-                ##determine developer/publisher logic
-                if developer is not None:
-                    dev_pub_null = 'false'
-                    
-                    db_cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', (developer, ))
-                    developer_fk_array = db_cursor.fetchone()
-                    if developer_fk_array is not None:
-                        developer_fk = developer_fk_array[0]
-                    else:
-                        #also try to match the uppercase variant with some filtering of the developer 
-                        #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
-                        db_cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
-                                       [developer.upper().replace('.','').replace(':','')
-                                        .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
-                        developer_fk_array = db_cursor.fetchone()
-                        
-                        if developer_fk_array is not None:
-                            developer_fk = developer_fk_array[0]
-                        else:
-                            logger.warning(f'PQ >>> Unable to link developer name to an existing DB company entry for {product_id}.')
-                            developer_fk = None
-                else:
-                    developer_fk = None
-                    
-                if publisher is not None:
-                    dev_pub_null = 'false'
-                    
-                    db_cursor.execute('SELECT gc_int_nr FROM gog_companies WHERE gc_name = ?', (publisher, ))
-                    publisher_fk_array = db_cursor.fetchone()
-                    if publisher_fk_array is not None:
-                        publisher_fk = publisher_fk_array[0]
-                    else:
-                        #also try to match the uppercase variant with some filtering of the publisher 
-                        #(works in some case, for ex: LTD. vs Ltd., 1C:Ino-Co vs 1C Ino-Co etc)
-                        db_cursor.execute(COMPANY_SELECT_FILTER_QUERY, 
-                                       [publisher.upper().replace('.','').replace(':','')
-                                        .replace(', ','').replace('/ ','').replace(',','').replace('/',''), ])
-                        publisher_fk_array = db_cursor.fetchone()
-                        
-                        if publisher_fk_array is not None:
-                            publisher_fk = publisher_fk_array[0]
-                        else:
-                            logger.warning(f'PQ >>> Unable to link publisher name to an existing DB company entry for {product_id}.')
-                            publisher_fk = None
-                else:
-                    publisher_fk = None
-            
+                #detect if the entry is a movie based on the links_forum value and then on the content of the 
+                #lead description field, since the APIs ofer no discrimination (it's not pretty, but it works)
+                if (((links_forum == 'https://www.gog.com/forum/movies') or 
+                   (description_lead is not None and description_lead.startswith('IMDB rating:')) or
+                   #workaround for 'Deliverance: The Making of Kingdom Come'
+                   product_id == 1161629383 or 
+                   #workaround for 'Mars'
+                   product_id == 1207666543 or 
+                   #workaround for 'Fechtbuch: The Real Swordfighting behind Kingdom Come'
+                   product_id == 2125927245) and not 
+                   #workaround to exclude 'Double Fine Adventure Definitive Edition'
+                   (product_id == 1691391100 or
+                   #workaround to exclude 'Double Fine Adventure Additional Content'
+                   product_id == 1394340350)):
+                    is_movie = True
+                                
             if entry_count == 0:
-                #add custom db field values to the HTTP response list
-                #gp_int_nr
-                values_pretty.insert(0, None)
-                #gp_int_added
-                values_pretty.insert(1, datetime.now())
-                #gp_int_previous_update
-                values_pretty.insert(2, None)
-                #gp_int_no_longer_listed
-                values_pretty.insert(3, None)
-                #gp_int_dev_pub_null
-                values_pretty.insert(4, dev_pub_null)
-                #gp_int_latest_update
-                values_pretty.insert(5, None)
-                #gp_int_is_movie
-                values_pretty.insert(6, is_movie)
-                #gp_int_previous_full_json_payload
-                values_pretty.insert(7, None)
-                #gp_int_full_json_payload
-                values_pretty.insert(8, json_pretty)
-                #gp_developer
-                values_pretty.insert(12, developer)
-                #gp_publisher
-                values_pretty.insert(13, publisher)
-                #gp_developer_fk
-                values_pretty.insert(14, developer_fk)
-                #gp_publisher_fk
-                values_pretty.insert(15, publisher_fk)
-                #ideally this should be a tuple, but the values_pretty list will work just fine
                 with db_lock:
-                    db_cursor.execute(INSERT_ID_QUERY, values_pretty)
+                    #gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated, gp_int_json_payload, 
+                    #gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload, 
+                    #gp_int_v2_json_diff, gp_int_is_movie, gp_v2_developer, gp_v2_publisher,
+                    #gp_v2_tags, gp_v2_series, gp_v2_features, gp_v2_is_using_dosbox,
+                    #gp_id, gp_title, gp_slug, gp_cs_compat_windows, 
+                    #gp_cs_compat_osx, gp_cs_compat_linux, gp_languages, gp_links_forum, 
+                    #gp_links_product_card, gp_links_support, gp_in_development, gp_is_installable, 
+                    #gp_game_type, gp_is_pre_order, gp_release_date, gp_description_lead, 
+                    #gp_description_full, gp_description_cool, gp_changelog
+                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted,
+                                                        None, None, None, None, is_movie, None, None, 
+                                                        None, None, None, None,
+                                                        product_id, product_title, product_slug, cs_compat_windows, 
+                                                        cs_compat_osx, cs_compat_linux, languages, links_forum, 
+                                                        links_product_card, links_support, in_development, is_installable, 
+                                                        game_type, is_pre_order, release_date, description_lead, 
+                                                        description_full, description_cool, changelog))
                     db_connection.commit()
-
                 logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}.')
             
             elif entry_count == 1:
@@ -679,98 +445,72 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     logger.info(f'PQ >>> Found an existing db entry with id {product_id}. Skipping.')
                 #only clear the unlisted date if the id is re-activated
                 elif scan_mode == 'archive':
-                    logger.info(f'PQ >>> Found a previously unlisted entry with id {product_id}. Clearing unlisted status...')
+                    logger.info(f'PQ >>> Found a previously delisted entry with id {product_id}. Clearing delisted status...')
                     with db_lock:
-                        db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = NULL WHERE gp_id = ?', (product_id, ))
+                        db_cursor.execute('UPDATE gog_products SET gp_int_delisted = NULL WHERE gp_id = ?', (product_id, ))
                         db_connection.commit()
-                    logger.info(f'PQ ~~~ Successfully updated unlisted status for {product_id}: {product_title}')
+                    logger.info(f'PQ ~~~ Successfully updated delisted status for {product_id}: {product_title}')
                 #manual scans will be treated as update scans
                 else:
-                    db_cursor.execute('SELECT gp_int_dev_pub_null, gp_int_full_json_payload, gp_int_latest_update, gp_developer, gp_publisher FROM gog_products '
-                                      'WHERE gp_id = ?', (product_id, ))
-                    query_result = db_cursor.fetchone()
-                    existing_dev_pub_null = query_result[0]
-                    existing_full_json = query_result[1]
-                    existing_update_timestamp = query_result[2]
-                    existing_developer = query_result[3]
-                    existing_publisher = query_result[4]
+                    db_cursor.execute('SELECT gp_int_json_payload FROM gog_products WHERE gp_id = ?', (product_id, ))
+                    existing_json_formatted = db_cursor.fetchone()[0]
                     
-                    if existing_full_json != json_pretty or existing_developer != developer or existing_publisher != publisher:
-                        if existing_developer != developer or existing_publisher != publisher:
-                            if developer is not None and publisher is not None and developer != '' and publisher != '':
-                                logger.info(f'PQ >>> Developer/publisher is out of date for {product_id}. Updating...')
-                                with db_lock:
-                                    db_cursor.execute('UPDATE gog_products SET gp_developer = ?, gp_publisher = ?, gp_developer_fk = ?, gp_publisher_fk = ?, '
-                                                      'gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
-                                                      (developer, publisher, developer_fk, publisher_fk, dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
-                                    db_connection.commit()
-                                logger.info(f'PQ ~~~ Successfully updated developer/publisher for {product_id}: {product_title}.')
-                            else:
-                                #only log warning and update if the developer/publisher null status has just changed from false to true
-                                if existing_dev_pub_null == 'false':
-                                    logger.warning(f'PQ >>> Current developer/publisher for {product_id} is null. Will retain previous values.')
-                                    with db_lock:
-                                        db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
-                                                          (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
-                                        db_connection.commit()
-                                    logger.info(f'PQ ~~~ Successfully set developer/publisher null status for {product_id}: {product_title}.')
-                                    
-                        #should only happen rarely, but the developer/publisher null status should be reset nevertheless
-                        elif existing_developer == developer and existing_publisher == publisher and existing_dev_pub_null == 'true':
-                            if developer is not None and publisher is not None and developer != '' and publisher != '':
-                                logger.info(f'PQ >>> Current developer/publisher for {product_id} is valid, but null status is set. Resetting...')
-                                with db_lock:
-                                    db_cursor.execute('UPDATE gog_products SET gp_int_dev_pub_null = ?, gp_int_previous_update = ?, gp_int_latest_update = ? WHERE gp_id = ?', 
-                                                      (dev_pub_null, existing_update_timestamp, datetime.now(), product_id))
-                                    db_connection.commit()
-                                logger.info(f'PQ ~~~ Successfully reset developer/publisher null status for {product_id}: {product_title}.')
+                    if existing_json_formatted != json_formatted:
+                        logger.info(f'PQ >>> Existing entry for {product_id} is outdated. Updating...')
                         
-                        if existing_full_json != json_pretty:
-                            logger.info(f'PQ >>> Existing entry for {product_id} is out of date. Updating...')
-                            
-                            #add custom db field values to the HTTP response list
-                            #gp_int_previous_update
-                            values_pretty.insert(0, existing_update_timestamp)
-                            #gp_int_latest_update
-                            values_pretty.insert(1, datetime.now())
-                            #gp_int_no_longer_listed
-                            values_pretty.insert(2, None)
-                            #gp_int_previous_full_json_payload
-                            values_pretty.insert(3, existing_full_json)
-                            #gp_int_full_json_payload
-                            values_pretty.insert(4, json_pretty)
-                            #add gp_id at the bottom of the list
-                            values_pretty.append(values_pretty[5])
-                            #remove gp_id from initial position
-                            del values_pretty[5]
-                            #ideally this should be a tuple, but the values_pretty list will work just fine
-                            with db_lock:
-                                db_cursor.execute(UPDATE_ID_QUERY, values_pretty)
-                                db_connection.commit()
-                            logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
+                        #calculate the diff between the new json and the previous one
+                        #(applying the diff on the new json will revert to the previous version)
+                        if existing_json_formatted is not None:
+                            diff_formatted = ''
+                            for line in difflib.unified_diff(json_formatted.splitlines(1), existing_json_formatted.splitlines(1), n=0):
+                                diff_formatted = ''.join((diff_formatted, line))
+                        else:
+                            diff_formatted = None
+                        
+                        with db_lock:
+                            #gp_int_updated, gp_int_json_payload, gp_int_json_diff, gp_title, 
+                            #gp_slug, gp_cs_compat_windows, gp_cs_compat_osx, gp_cs_compat_linux, 
+                            #gp_languages, gp_links_forum, gp_links_product_card, gp_links_support, 
+                            #gp_in_development, gp_is_installable, #gp_game_type, gp_is_pre_order, gp_release_date, 
+                            #gp_description_lead, gp_description_full, gp_description_cool, gp_changelog, gp_id (WHERE clause)
+                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted, product_title, 
+                                                                product_slug, cs_compat_windows, cs_compat_osx, cs_compat_linux, 
+                                                                languages, links_forum, links_product_card, links_support, 
+                                                                in_development, is_installable, game_type, is_pre_order, release_date, 
+                                                                description_lead, description_full, description_cool, changelog, product_id))
+                            db_connection.commit()
+                        logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
+            
+            #movies do not have a valid v2 product API entry
+            if not is_movie:
+                #call the v2 api query to save the v2 json payload and populate developer/publisher values
+                gog_product_v2_query(product_id, session, db_connection)
+            #fall back to website scraping of developer/publisher values for movies
+            elif links_forum is not None:
+                gog_product_company_query(product_id, session, db_connection, links_forum.replace('/game/', '/movie/'))
                             
         #existing ids return a 404 HTTP error code on removal
         elif (scan_mode == 'update' or scan_mode == 'archive') and response.status_code == 404:
             #check to see the existing value for gp_int_no_longer_listed
-            db_cursor = db_connection.execute('SELECT gp_int_no_longer_listed FROM gog_products WHERE gp_id = ?', (product_id, ))
-            current_no_longer_listed = db_cursor.fetchone()[0]
+            db_cursor = db_connection.execute('SELECT gp_title, gp_int_delisted FROM gog_products WHERE gp_id = ?', (product_id, ))
+            product_title, existing_delisted = db_cursor.fetchone()
             
-            #only alter the entry of not already marked as no longer listed
-            if current_no_longer_listed is None:
-                logger.warning(f'PQ >>> Product with id {product_id} is no longer listed...')
+            #only alter the entry if not already marked as no longer listed
+            if existing_delisted is None:
+                logger.warning(f'PQ >>> Product with id {product_id} has been delisted...')
                 with db_lock:
-                    db_cursor.execute('UPDATE gog_products SET gp_int_no_longer_listed = ? WHERE gp_id = ?', (datetime.now(), product_id))
+                    db_cursor.execute('UPDATE gog_products SET gp_int_delisted = ? WHERE gp_id = ?', (datetime.now(), product_id))
                     db_connection.commit()
-                logger.info(f'PQ --- Updated the DB entry for: {product_id}.')
+                logger.info(f'PQ --- Updated the DB entry for: {product_id}: {product_title}.')
             else:
                 #force a retry scan if in archive mode
                 if scan_mode == 'archive':
                     raise Exception()
                 else:
-                    logger.debug(f'PQ >>> Product with id {product_id} is already marked as no longer listed.')
+                    logger.debug(f'PQ >>> Product with id {product_id} is already marked as delisted.')
                     
         #unmapped ids will also return a 404 HTTP error code
-        elif (scan_mode == 'full' or scan_mode == 'manual' or scan_mode == 'removed' or scan_mode == 'third_party') and response.status_code == 404:
+        elif response.status_code == 404:
             logger.debug(f'PQ >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
         
         else:
@@ -779,11 +519,20 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
         
         return True
         
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.warning(f'PQ >>> Connection error encountered for {product_id}.')
+        return False
+    
+    #sometimes the HTTPS connection encounters SSL errors
+    except requests.exceptions.SSLError:
+        logger.warning(f'PQ >>> Connection SSL error encountered for {product_id}.')
+        return False
+            
     except:
         logger.debug(f'PQ >>> Product extended query has failed for {product_id}.')
         #uncomment for debugging purposes only
-        #raise
-        
+        #logger.error(traceback.format_exc())
         return False
     
 def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
@@ -813,9 +562,8 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
                 logger.debug(f'GQ >>> Found the following id: {id_value}.')
                 id_set.add(id_value)
             
-            #transform the set to a list in order to be able to sort it
-            id_list = list(id_set)
-            id_list.sort()
+            #sort the set into an ordered list
+            id_list = sorted(id_set)
                 
             for product_id in id_list:
                 logger.debug(f'GQ >>> Running scan for id {product_id}...')
@@ -839,10 +587,21 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
         
         return totalPages
                 
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.warning(f'GQ >>> Connection error encountered for {product_id}.')
+        return 0
+    
+    #sometimes the HTTPS connection encounters SSL errors
+    except requests.exceptions.SSLError:
+        logger.warning(f'GQ >>> Connection SSL error encountered for {product_id}.')
+        return 0
+    
     except:
         logger.critical('GQ >>> Processing has failed!')
         #uncomment for debugging purposes only
-        #raise
+        #logger.error(traceback.format_exc())
+        return 0
     
 def gog_products_third_party_query(third_party_url, scan_mode, session, db_connection):
     
@@ -892,17 +651,24 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
     except:
         logger.critical('TQ >>> Processing has failed!')
         #uncomment for debugging purposes only
-        #raise
+        #logger.error(traceback.format_exc())
+        raise
         
 def gog_files_extract_parser(db_connection, product_id):
-    db_cursor = db_connection.execute('SELECT gp_int_full_json_payload FROM gog_products WHERE gp_id = ?', (product_id, ))
-    #retrieve the latest json_payload
+    
+    db_cursor = db_connection.execute('SELECT gp_int_json_payload FROM gog_products WHERE gp_id = ?', (product_id, ))
     json_payload = db_cursor.fetchone()[0]
     
+    json_parsed = json.loads(json_payload, object_pairs_hook=OrderedDict)
+    
     #extract installer entries
-    json_parsed_installers = json.loads(json_payload, object_pairs_hook=OrderedDict)['downloads']['installers']
+    json_parsed_installers = json_parsed['downloads']['installers']
     #extract patch entries
-    json_parsed_patches = json.loads(json_payload, object_pairs_hook=OrderedDict)['downloads']['patches']
+    json_parsed_patches = json_parsed['downloads']['patches']
+    #extract language_packs entries
+    json_parsed_language_packs = json_parsed['downloads']['language_packs']
+    #extract bonus_content entries
+    json_parsed_bonus_content = json_parsed['downloads']['bonus_content']
     
     #process installer entries
     for installer_entry in json_parsed_installers:
@@ -916,29 +682,27 @@ def gog_files_extract_parser(db_connection, product_id):
         for installer_file in installer_entry['files']:
             installer_file_id = installer_file['id']
             installer_file_size = installer_file['size']
-            installer_file_downlink = installer_file['downlink']
             
             if installer_version is not None:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'installer\' AND gf_id = ? '
-                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_size = ?', 
-                                  (product_id, installer_id, installer_file_id, installer_os, installer_language, installer_version, installer_file_size))
+                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                                  (product_id, installer_id, installer_os, installer_language, installer_version, installer_file_id, installer_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'installer\' AND gf_id = ? '
-                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version is NULL AND gf_file_size = ?', 
-                                  (product_id, installer_id, installer_file_id, installer_os, installer_language, installer_file_size))
+                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ?', 
+                                  (product_id, installer_id, installer_os, installer_language, installer_file_id, installer_file_size))
                 
             existing_entries = db_cursor.fetchone()[0]
             
             if existing_entries == 0:
-                #gf_int_nr, gf_int_added, gf_int_product_id, gf_int_type,
-                #gf_id, gf_name, gf_os, gf_language,
-                #gf_version, gf_total_size, gf_file_id, gf_file_size, gf_file_downlink
+                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type,
+                #gf_id, gf_name, gf_os, gf_language, gf_version,
+                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
                 db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'installer', 
-                                                       installer_id, installer_product_name, installer_os, installer_language, 
-                                                       installer_version, installer_total_size, installer_file_id, installer_file_size, installer_file_downlink))
-                
+                                                       installer_id, installer_product_name, installer_os, installer_language, installer_version,
+                                                       None, None, installer_total_size, installer_file_id, installer_file_size))
                 #no need to print the os here, as it's included in the installer_id
-                logger.info(f'FQ +++ Added DB entry for {product_id}: {installer_product_name}, {installer_id}, version {installer_version}.')
+                logger.info(f'FQ +++ Added DB entry for {product_id}: {installer_product_name}, {installer_id}, {installer_version}.')
     
     #process patch entries
     for patch_entry in json_parsed_patches:
@@ -947,38 +711,100 @@ def gog_files_extract_parser(db_connection, product_id):
         patch_os = patch_entry['os']
         patch_language = patch_entry['language']
         patch_version = patch_entry['version']
+        #replace blank patch version with None (blanks happens with patches, but not with installers)
+        if patch_version == '': patch_version = None
         patch_total_size = patch_entry['total_size']
-        
-        #replace blank patch version with None (somehow this only occurs with patches, not with installers)
-        if patch_version == '': 
-            patch_version = None
         
         for patch_file in patch_entry['files']:
             patch_file_id = patch_file['id']
             patch_file_size = patch_file['size']
-            patch_file_downlink = patch_file['downlink']
                 
             if patch_version is not None:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'patch\' AND gf_id = ? '
-                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_size = ?', 
-                                  (product_id, patch_id, patch_file_id, patch_os, patch_language, patch_version, patch_file_size))
+                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                                  (product_id, patch_id, patch_os, patch_language, patch_version, patch_file_id, patch_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(gf_id) FROM gog_files WHERE gf_int_product_id = ? AND gf_int_type = \'patch\' AND gf_id = ? '
-                                  'AND gf_file_id = ? AND gf_os = ? AND gf_language = ? AND gf_version is NULL AND gf_file_size = ?', 
-                                  (product_id, patch_id, patch_file_id, patch_os, patch_language, patch_file_size))
+                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ?', 
+                                  (product_id, patch_id, patch_os, patch_language, patch_file_id, patch_file_size))
                 
             existing_entries = db_cursor.fetchone()[0]
             
             if existing_entries == 0:
-                #gf_int_nr, gf_int_added, gf_int_product_id, gf_int_type,
-                #gf_id, gf_name, gf_os, gf_language,
-                #gf_version, gf_total_size, gf_file_id, gf_file_size, gf_file_downlink
+                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type,
+                #gf_id, gf_name, gf_os, gf_language, gf_version,
+                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
                 db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'patch', 
-                                                       patch_id, patch_product_name, patch_os, patch_language, 
-                                                       patch_version, patch_total_size, patch_file_id, patch_file_size, patch_file_downlink))
-                
+                                                       patch_id, patch_product_name, patch_os, patch_language, patch_version,
+                                                       None, None, patch_total_size, patch_file_id, patch_file_size))
                 #no need to print the os here, as it's included in the patch_id
-                logger.info(f'FQ +++ Added DB entry for {product_id}: {patch_product_name}, {patch_id}, version {patch_version}.')
+                logger.info(f'FQ +++ Added DB entry for {product_id}: {patch_product_name}, {patch_id}, {patch_version}.')
+    
+    #process language_packs entries
+    for language_pack_entry in json_parsed_language_packs:
+        language_pack_id = language_pack_entry['id']
+        language_pack_product_name = language_pack_entry['name']
+        language_pack_os = language_pack_entry['os']
+        language_pack_language = language_pack_entry['language']
+        language_pack_version = language_pack_entry['version']
+        language_pack_total_size = language_pack_entry['total_size']
+        
+        for language_pack_file in language_pack_entry['files']:
+            language_pack_file_id = language_pack_file['id']
+            language_pack_file_size = language_pack_file['size']
+                
+            if language_pack_version is not None:
+                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                                  (product_id, language_pack_id, language_pack_os, language_pack_language, language_pack_version, 
+                                   language_pack_file_id, language_pack_file_size))
+            else:
+                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ?', 
+                                  (product_id, language_pack_id, language_pack_os, language_pack_language, 
+                                   language_pack_file_id, language_pack_file_size))
+                
+            existing_entries = db_cursor.fetchone()[0]
+            
+            if existing_entries == 0:
+                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type, gf_id,
+                #gf_name, gf_os, gf_language, gf_version,
+                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'language_packs', language_pack_id, 
+                                                       language_pack_product_name, language_pack_os, language_pack_language, language_pack_version,
+                                                       None, None, language_pack_total_size, language_pack_file_id, language_pack_file_size))
+                #no need to print the os here, as it's included in the patch_id
+                logger.info(f'FQ +++ Added DB entry for {product_id}: {language_pack_product_name}, {language_pack_id}, {language_pack_version}.')
+                
+    #process bonus_content entries
+    for bonus_content_entry in json_parsed_bonus_content:
+        bonus_content_id = bonus_content_entry['id']
+        bonus_content_product_name = bonus_content_entry['name']
+        #bonus content type 'guides & reference ' has a trailing space
+        bonus_content_type = bonus_content_entry['type'].strip()
+        bonus_content_count = bonus_content_entry['count']
+        bonus_content_total_size = bonus_content_entry['total_size']
+        
+        for bonus_content_file in bonus_content_entry['files']:
+            bonus_content_file_id = bonus_content_file['id']
+            bonus_content_file_size = bonus_content_file['size']
+            
+            db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "bonus_content" AND gf_id = ? '
+                              'AND gf_type = ? AND gf_count = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                              (product_id, bonus_content_id, bonus_content_type, bonus_content_count, bonus_content_file_id, bonus_content_file_size))
+                
+            existing_entries = db_cursor.fetchone()[0]
+            
+            if existing_entries == 0:
+                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type,
+                #gf_id, gf_name, gf_os, gf_language, gf_version,
+                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'bonus_content', 
+                                                       bonus_content_id, bonus_content_product_name, None, None, None,
+                                                       bonus_content_type, bonus_content_count, bonus_content_total_size, 
+                                                       bonus_content_file_id, bonus_content_file_size))
+                #print the entry type, since bonus_content entries are not versioned
+                logger.info(f'FQ +++ Added DB entry for {product_id}: {bonus_content_product_name}, {bonus_content_id}, {bonus_content_type}.')
                 
     #batch commit
     db_connection.commit()
@@ -1018,7 +844,7 @@ def gog_products_bulk_query(product_id, product_ids_string, scan_mode, session, 
         
         #this should not be handled as an exception, as it's the default behavior when nothing is detected
         elif response.status_code == 200 and response.text == '[]':
-            logger.debug('BQ >>> A blank list entry ("[]") received.')
+            logger.debug('BQ >>> A blank list entry ([]) received.')
         
         else:
             logger.warning(f'BQ >>> HTTP error code {response.status_code} received for the {product_id} '
@@ -1027,10 +853,26 @@ def gog_products_bulk_query(product_id, product_ids_string, scan_mode, session, 
                 
         return True
     
+    #atempt a proxy restart in case of a timeout by raising an exception to the workload_dispatcher
+    except requests.Timeout:
+        logger.warning(f'BQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds '
+                       f'for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+        raise Exception()
+    
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.warning(f'BQ >>> Connection error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+        return False
+    
+    #sometimes the HTTPS connection encounters SSL errors
+    except requests.exceptions.SSLError:
+        logger.warning(f'BQ >>> Connection SSL error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+        return False
+    
     except:
         logger.debug(f'BQ >>> Products bulk query has failed for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
         #uncomment for debugging purposes only
-        #raise
+        #logger.error(traceback.format_exc())
         
         return False
             
@@ -1096,8 +938,8 @@ group.add_argument('-f', '--full', help='Perform a full products scan', action='
 group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
 group.add_argument('-t', '--third_party', help='Perform a third-party (Adalia Fundamentals) products scan', action='store_true')
 group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
-group.add_argument('-r', '--removed', help='Perform a re-scan of previously removed (archived) products', action='store_true')
-group.add_argument('-a', '--archive', help='Archive any removed products', action='store_true')
+group.add_argument('-d', '--delisted', help='Perform a re-scan of previously delisted (archived) products', action='store_true')
+group.add_argument('-a', '--archive', help='Archive any delisted products', action='store_true')
 
 args = parser.parse_args()
 
@@ -1106,18 +948,19 @@ logger.info('*** Running PRODUCTS scan script ***')
 try:
     #reading from config file
     configParser.read(conf_file_full_path)
+    general_section = configParser['GENERAL']
     #parsing generic parameters
-    conf_backup = configParser['GENERAL']['conf_backup']
-    db_backup = configParser['GENERAL']['db_backup']
-    scan_mode = configParser['GENERAL']['scan_mode']
+    conf_backup = general_section.getboolean('conf_backup')
+    db_backup = general_section.getboolean('db_backup')
+    scan_mode = general_section.get('scan_mode')
     #parsing constants
-    HTTP_TIMEOUT = int(configParser['GENERAL']['http_timeout'])
-    RETRY_COUNT = int(configParser['GENERAL']['retry_count'])
-    RETRY_SLEEP_INTERVAL = int(configParser['GENERAL']['retry_sleep_interval'])
-    RETRY_AMPLIFICATION_FACTOR = int(configParser['GENERAL']['retry_amplification_factor'])
+    HTTP_TIMEOUT = general_section.getint('http_timeout')
+    RETRY_COUNT = general_section.getint('retry_count')
+    RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
+    RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
-    raise Exception()
+    raise SystemExit(1)
 
 #detect any parameter overrides and set the scan_mode accordingly
 if len(argv) > 1:
@@ -1139,9 +982,8 @@ if len(argv) > 1:
         scan_mode = 'removed'
     elif args.archive:
         scan_mode = 'archive'
-        
-#allow scan_mode specific conf backup strategies
-if conf_backup == 'true' or conf_backup == scan_mode:
+
+if conf_backup:
     #conf file check/backup section
     if path.exists(conf_file_full_path):
         #create a backup of the existing conf file - mostly for debugging/recovery
@@ -1149,10 +991,9 @@ if conf_backup == 'true' or conf_backup == scan_mode:
         logger.info('Successfully created conf file backup.')
     else:
         logger.critical('Could find specified conf file!')
-        raise Exception()
+        raise SystemExit(2)
 
-#allow scan_mode specific db backup strategies
-if db_backup == 'true' or db_backup == scan_mode:
+if db_backup:
     #db file check/backup section
     if path.exists(db_file_full_path):
         #create a backup of the existing db - mostly for debugging/recovery
@@ -1161,7 +1002,7 @@ if db_backup == 'true' or db_backup == scan_mode:
     else:
         #subprocess.run(['python', 'gog_create_db.py'])
         logger.critical('Could find specified DB file!')
-        raise Exception()
+        raise SystemExit(3)
     
 if scan_mode == 'full':
     logger.info('--- Running in FULL scan mode ---')
@@ -1172,34 +1013,28 @@ if scan_mode == 'full':
     #theads sync (on exit) timeout interval (seconds)
     THREAD_SYNC_TIMEOUT = 30
     
-    ID_SAVE_INTERVAL = int(configParser['FULL_SCAN']['id_save_interval'])
+    full_scan_section = configParser['FULL_SCAN']
+    ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
     #50 is the max id batch size allowed by the bulk products API 
-    IDS_IN_BATCH = int(configParser['FULL_SCAN']['ids_in_batch'])
+    IDS_IN_BATCH = full_scan_section.getint('ids_in_batch')
     #number of active connection threads
-    CONNECTION_THREADS = int(configParser['FULL_SCAN']['connection_threads'])
+    CONNECTION_THREADS = full_scan_section.getint('connection_threads')
     #stop_id = 2147483647, in order to scan the full range,
     #stopping at the upper limit of a 32 bit signed integer type
-    stop_id = int(configParser['FULL_SCAN']['stop_id'])
-
-    try:
-        product_id = int(configParser['FULL_SCAN']['start_id'])
-        #reduce starting point by a batch to account for any thread overlap
-        if product_id > ID_SAVE_INTERVAL:
-            product_id -= ID_SAVE_INTERVAL
-        logger.info(f'Restarting scan from id: {product_id}.')
-    except:
-        product_id = 0
+    stop_id = full_scan_section.getint('stop_id')
+    #product_id will restart from scan_id
+    product_id = full_scan_section.getint('start_id')
+    #reduce starting point by a batch to account for any thread overlap
+    if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
+    
+    logger.info(f'Restarting scan from id: {product_id}.')
     
     queue = Queue(CONNECTION_THREADS * 2)
     
     try:
         for thread_no in range(CONNECTION_THREADS):
             #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
-            if CONNECTION_THREADS > 9 and thread_no < 9:
-                THREAD_LOGGING_FILLER = '0'
-            else:
-                THREAD_LOGGING_FILLER = ''
-            
+            THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
             thread_no_nice = ''.join((THREAD_LOGGING_FILLER, str(thread_no + 1)))
             
             logger.info(f'Starting thread T#{thread_no_nice}...')
@@ -1222,10 +1057,10 @@ if scan_mode == 'full':
             #write the stop_id as the start_id in the config file
             configParser.read(conf_file_full_path)
             configParser['FULL_SCAN']['start_id'] = str(product_id)
-                    
+            
             with open(conf_file_full_path, 'w') as file:
                 configParser.write(file)
-                
+            
             raise KeyboardInterrupt
                 
     except KeyboardInterrupt:
@@ -1244,8 +1079,9 @@ if scan_mode == 'full':
 elif scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
     
-    last_id = int(configParser['UPDATE_SCAN']['last_id'])
-    LAST_ID_SAVE_FREQUENCY = int(configParser['UPDATE_SCAN']['last_id_save_frequency'])
+    update_scan_section = configParser['UPDATE_SCAN']
+    last_id = update_scan_section.getint('last_id')
+    ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
     
     if last_id > 0:
         logger.info(f'Restarting update scan from id: {last_id}.')
@@ -1255,16 +1091,16 @@ elif scan_mode == 'update':
         
         with sqlite3.connect(db_file_full_path) as db_connection:
             #skip products which are no longer listed
-            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? AND gp_int_no_longer_listed IS NULL ORDER BY 1', (last_id, ))
-            array_of_id_lists = db_cursor.fetchall()
+            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? AND gp_int_delisted IS NULL ORDER BY 1', (last_id, ))
+            id_list = db_cursor.fetchall()
             logger.debug('Retrieved all existing product ids from the DB...')
             
             #track the number of processed ids
             last_id_counter = 0
                 
             with requests.Session() as session:
-                for id_list in array_of_id_lists:
-                    current_product_id = id_list[0]
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
                     logger.debug(f'Now processing id {current_product_id}...')
                     retries_complete = False
                     retry_counter = 0
@@ -1286,7 +1122,7 @@ elif scan_mode == 'update':
                         else:
                             retry_counter += 1
                             
-                    if last_id_counter != 0 and last_id_counter % LAST_ID_SAVE_FREQUENCY == 0:
+                    if last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -1337,9 +1173,10 @@ elif scan_mode == 'new':
 elif scan_mode == 'manual':
     logger.info('--- Running in MANUAL scan mode ---')
     
+    manual_scan_section = configParser['MANUAL_SCAN']
     #load the product id list to process
-    product_id_list = configParser['MANUAL_SCAN']['id_list']
-    product_id_list = [product_id.strip() for product_id in product_id_list.split(',')]
+    product_id_list = manual_scan_section.get('id_list')
+    product_id_list = [int(product_id.strip()) for product_id in product_id_list.split(',')]
     
     try:
         with requests.Session() as session:
@@ -1396,12 +1233,12 @@ elif scan_mode == 'extract':
         logger.info('Starting files scan on all existing DB entries...')
         
         with sqlite3.connect(db_file_full_path) as db_connection:
-            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products ORDER BY 1')
-            array_of_id_lists = db_cursor.fetchall()
+            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL ORDER BY 1')
+            id_list = db_cursor.fetchall()
             logger.debug('Retrieved all existing product ids from the DB...')
             
-            for id_list in array_of_id_lists:
-                current_product_id = id_list[0]
+            for id_entry in id_list:
+                current_product_id = id_entry[0]
                 logger.debug(f'Now processing id {current_product_id}...')
                 
                 gog_files_extract_parser(db_connection, current_product_id)
@@ -1412,21 +1249,21 @@ elif scan_mode == 'extract':
     except KeyboardInterrupt:
         pass
     
-elif scan_mode == 'removed':
-    logger.info('--- Running in REMOVED (UNLISTED) scan mode ---')
+elif scan_mode == 'delisted':
+    logger.info('--- Running in DELISTED (ARCHIVED) scan mode ---')
     
     try:
-        logger.info('Starting scan on all removed (unlisted) DB entries...')
+        logger.info('Starting scan on all delisted (archived) DB entries...')
         
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
                 #select all products which are no longer listed, excluding potential duplicates
-                db_cursor = db_connection.execute('SELECT DISTINCT gpu_id FROM gog_products_unlisted')
-                array_of_id_lists = db_cursor.fetchall()
-                logger.debug('Retrieved all removed (unlisted) product ids from the DB...')
+                db_cursor = db_connection.execute('SELECT DISTINCT gpd_id FROM gog_products_delisted ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all delisted (archived) product ids from the DB...')
                 
-                for id_list in array_of_id_lists:
-                    current_product_id = id_list[0]
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
                     logger.debug(f'Now processing id {current_product_id}...')
                     retries_complete = False
                     retry_counter = 0
@@ -1455,28 +1292,27 @@ elif scan_mode == 'archive':
     logger.info('--- Running in ARCHIVE mode ---')
     
     try:
-        logger.info('Starting archive procedure on all unlisted IDs...')
+        logger.info('Starting archive procedure on all delisted IDs...')
         
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
                 #select all unlisted ids from the gog_products table
-                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL ORDER BY 1')
-                array_of_id_lists = db_cursor.fetchall()
-                logger.debug('Retrieved all unlisted product ids from the DB...')
+                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NOT NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all delisted product ids from the DB...')
                 
-                unlisted_id_list = []
+                delisted_ids = []
                 
-                if len(array_of_id_lists) > 0:
-                    logger.info('Retrying to access all unlisted ids...')
+                if len(id_list) > 0:
+                    logger.info('Retrying to access all delisted ids...')
     
-                    for id_list in array_of_id_lists:
-                        current_product_id = id_list[0]
+                    for id_entry in id_list:
+                        current_product_id = id_entry[0]
                         logger.info(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
                         
-                        #allow only two retries, then consider the id parmenently unlisted
-                        while not retries_complete and retry_counter < 3:
+                        while not retries_complete and retry_counter < ARCHIVE_NO_OF_RETRIES:
                             if retry_counter > 0:
                                 logger.warning(f'Reprocessing id {current_product_id}...')
                                 #allow a short respite before re-processing
@@ -1491,18 +1327,18 @@ elif scan_mode == 'archive':
                                 retry_counter += 1
                         
                         if retries_complete == False:
-                            unlisted_id_list.append(current_product_id)
+                            delisted_ids.append(current_product_id)
                             
-                    if len(unlisted_id_list) > 0:
+                    if len(delisted_ids) > 0:
                         logger.info('Archving all the unlisted ids...')
                         db_cursor = db_connection.cursor()
                         
-                        for unlisted_id in unlisted_id_list:
-                            logger.info(f'Now archiving id {unlisted_id}...')
-                            db_cursor.execute(ARCHIVE_UNLISTED_ID_QUERY, (unlisted_id, ))
-                            db_cursor.execute('DELETE FROM gog_products WHERE gp_int_no_longer_listed IS NOT NULL AND gp_id = ?', (unlisted_id, ))
+                        for delisted_id in delisted_ids:
+                            logger.info(f'Now archiving id {delisted_id}...')
+                            db_cursor.execute(ARCHIVE_DELISTED_ID_QUERY, (delisted_id, ))
+                            db_cursor.execute('DELETE FROM gog_products WHERE gp_id = ? AND gp_int_delisted IS NOT NULL', (delisted_id, ))
                             #for the sake of consistency, also remove any gog_files table entries saved under the archived id
-                            db_cursor.execute('DELETE FROM gog_files WHERE gf_int_product_id = ?', (unlisted_id, ))
+                            db_cursor.execute('DELETE FROM gog_files WHERE gf_int_id = ?', (delisted_id, ))
                             db_connection.commit()
                         
                         logger.info('Archiving completed.')
@@ -1516,7 +1352,7 @@ elif scan_mode == 'archive':
     except KeyboardInterrupt:
         pass
 
-if scan_mode == 'update' and reset_id == True:
+if scan_mode == 'update' and reset_id:
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
     configParser['UPDATE_SCAN']['last_id'] = '0'
