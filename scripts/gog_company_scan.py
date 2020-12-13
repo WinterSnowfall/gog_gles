@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.00
-@date: 22/11/2020
+@version: 2.20
+@date: 11/12/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -100,7 +100,7 @@ def gog_company_query(company_url):
                                 entry_count = db_cursor.fetchone()[0]
                                 
                                 if entry_count == 0:
-                                    logger.info('CQ >>> Detected a new company entry...')
+                                    logger.debug('CQ >>> Detected a new company entry...')
                                     #gc_int_nr, gc_int_added, gc_int_delisted, gc_name
                                     db_cursor.execute('INSERT INTO gog_companies VALUES (?,?,?,?)', 
                                                       (None, datetime.now(), None, company_name))

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.00
-@date: 22/11/2020
+@version: 2.20
+@date: 11/12/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -223,7 +223,8 @@ if scan_mode == 'update':
         logger.info('Starting full scan on all applicable DB entries...')
         
         with sqlite3.connect(db_file_full_path) as db_connection:
-            db_cursor = db_connection.execute('SELECT gp_id, gp_title FROM gog_products WHERE gp_id > ? ORDER BY 1', (last_id, ))
+            db_cursor = db_connection.execute('SELECT gp_id, gp_title FROM gog_products WHERE gp_id > ? AND '
+                                              'gp_int_delisted IS NULL ORDER BY 1', (last_id, ))
             id_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
         
@@ -257,7 +258,7 @@ if scan_mode == 'update':
                                 
                     if last_id_counter != 0 and last_id_counter % ID_SAVE_INTERVAL == 0:
                         configParser.read(conf_file_full_path)
-                        configParser['FULL_SCAN']['last_id'] = str(current_product_id)
+                        configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
                         with open(conf_file_full_path, 'w') as file:
                             configParser.write(file)
@@ -278,7 +279,8 @@ elif scan_mode == 'archive':
         
         with sqlite3.connect(db_file_full_path) as db_connection:
             db_cursor = db_connection.execute('SELECT DISTINCT gpr_int_id, gpr_int_title FROM gog_prices WHERE gpr_int_outdated IS NULL '
-                                              'AND gpr_int_id NOT IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
+                                              'AND gpr_int_id NOT IN (SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL '
+                                              'ORDER BY 1) ORDER BY 1')
             id_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
             
@@ -304,7 +306,7 @@ elif scan_mode == 'archive':
 if scan_mode == 'update' and reset_id:
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
-    configParser['FULL_SCAN']['last_id'] = '0'
+    configParser['UPDATE_SCAN']['last_id'] = '0'
             
     with open(conf_file_full_path, 'w') as file:
         configParser.write(file)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.00
-@date: 22/11/2020
+@version: 2.20
+@date: 11/12/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -91,44 +91,6 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_description_cool TEXT, '
                              'gp_changelog TEXT)')
 
-CREATE_GOG_PRODUCTS_DELISTED_QUERY = ('CREATE TABLE gog_products_delisted (gpd_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
-                                      'gpd_int_added TEXT NOT NULL, '
-                                      'gpd_int_delisted TEXT, '
-                                      #comment out internal fields that are not relevant 
-                                      #for archival purposes, in order to save some space
-                                      #'gpd_int_updated TEXT, '
-                                      'gpd_int_json_payload TEXT NOT NULL, '
-                                      #'gpd_int_json_diff TEXT, '
-                                      #'gpd_int_v2_updated TEXT, '
-                                      'gpd_int_v2_json_payload TEXT, '
-                                      #'gpd_int_v2_json_diff TEXT, '
-                                      'gpd_int_is_movie INTEGER NOT NULL, '
-                                      'gpd_v2_developer TEXT, '
-                                      'gpd_v2_publisher TEXT, '
-                                      'gpd_v2_tags TEXT, '
-                                      'gpd_v2_series TEXT, '
-                                      'gpd_v2_features TEXT, '
-                                      'gpd_v2_is_using_dosbox INTEGER, '
-                                      'gpd_id INTEGER NOT NULL, '
-                                      'gpd_title TEXT, '
-                                      'gpd_slug TEXT NOT NULL, '
-                                      'gpd_cs_compat_windows INTEGER NOT NULL, '
-                                      'gpd_cs_compat_osx INTEGER NOT NULL, '
-                                      'gpd_cs_compat_linux INTEGER NOT NULL, '
-                                      'gpd_languages, '
-                                      'gpd_links_forum TEXT, '
-                                      'gpd_links_product_card TEXT, '
-                                      'gpd_links_support TEXT, '
-                                      'gpd_in_development INTEGER NOT NULL, '
-                                      'gpd_is_installable INTEGER NOT NULL, '
-                                      'gpd_game_type TEXT NOT NULL, '
-                                      'gpd_is_pre_order INTEGER NOT NULL, '
-                                      'gpd_release_date TEXT, '
-                                      'gpd_description_lead TEXT, '
-                                      'gpd_description_full TEXT, '
-                                      'gpd_description_cool TEXT, '
-                                      'gpd_changelog TEXT)')
-
 ##main thread start
 
 #added support for optional command-line parameter mode switching
@@ -149,8 +111,6 @@ if not path.exists(db_file_full_path):
         db_cursor.execute(CREATE_GOG_PRICES_QUERY)
         db_cursor.execute('CREATE INDEX gpr_int_id_index ON gog_prices (gpr_int_id)')
         db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
-        db_cursor.execute(CREATE_GOG_PRODUCTS_DELISTED_QUERY)
-        db_cursor.execute('CREATE INDEX gpd_id_index ON gog_products_delisted (gpd_id)')
         db_connection.commit()
     
     logger.info('DB created successfully.')
