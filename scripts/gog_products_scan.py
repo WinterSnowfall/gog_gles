@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.20
-@date: 11/12/2020
+@version: 2.30
+@date: 23/12/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -88,7 +88,7 @@ UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_v2_features = ?, '
                       'gp_v2_is_using_dosbox = ? WHERE gp_id = ?')
 
-INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
 
@@ -551,11 +551,14 @@ def gog_products_third_party_query(third_party_url, scan_mode, session, db_conne
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
             db_cursor = db_connection.cursor()
             
-            for extra_id in json_parsed:
+            for extra_id_raw in json_parsed:
+                extra_id = extra_id_raw.strip()
+                if extra_id == '': extra_id = None
+                
                 logger.debug(f'TQ >>> Picked up the following product id: {extra_id}.')
                 
                 #at least one of the ids is null for some reason, so do check
-                if extra_id is not None and extra_id != '':
+                if extra_id is not None:
                     db_cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', (extra_id, ))
                     entry_count = db_cursor.fetchone()[0]
                     
@@ -606,12 +609,19 @@ def gog_files_extract_parser(db_connection, product_id):
     json_parsed_bonus_content = json_parsed['downloads']['bonus_content']
     
     #process installer entries
+    db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
+                      'AND gf_int_download_type = "installer" AND gf_int_removed IS NULL', (product_id,))
+    listed_installer_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
+        
     for installer_entry in json_parsed_installers:
         installer_id = installer_entry['id']
         installer_product_name = installer_entry['name'].strip()
         installer_os = installer_entry['os']
         installer_language = installer_entry['language']
-        installer_version = installer_entry['version'].strip()
+        try:
+            installer_version = installer_entry['version'].strip()
+        except AttributeError:
+            installer_version = None
         installer_total_size = installer_entry['total_size']
         
         for installer_file in installer_entry['files']:
@@ -619,33 +629,50 @@ def gog_files_extract_parser(db_connection, product_id):
             installer_file_size = installer_file['size']
             
             if installer_version is not None:
-                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
-                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, installer_id, installer_os, installer_language, installer_version, installer_file_id, installer_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
-                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ?', 
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, installer_id, installer_os, installer_language, installer_file_id, installer_file_size))
-                
-            existing_entries = db_cursor.fetchone()[0]
+              
+            entry_pk = db_cursor.fetchone()
             
-            if existing_entries == 0:
-                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type,
+            if entry_pk is None:
+                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
                 #gf_id, gf_name, gf_os, gf_language, gf_version,
                 #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'installer', 
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'installer', 
                                                        installer_id, installer_product_name, installer_os, installer_language, installer_version,
                                                        None, None, installer_total_size, installer_file_id, installer_file_size))
                 #no need to print the os here, as it's included in the installer_id
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {installer_product_name}, {installer_id}, {installer_version}.')
+            
+            else:
+                logger.debug(f'FQ >>> Found an existing entry for {product_id}: {installer_product_name}, {installer_id}, {installer_version}.')
+                listed_installer_pks.remove(entry_pk[0])
+                
+    if len(listed_installer_pks) > 0:
+        for removed_pk in listed_installer_pks:
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+        
+        logger.info(f'FQ --- Marked some installer entries as removed for {product_id}')
     
     #process patch entries
+    db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
+                      'AND gf_int_download_type = "patch" AND gf_int_removed IS NULL', (product_id,))
+    listed_patch_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
+    
     for patch_entry in json_parsed_patches:
         patch_id = patch_entry['id']
         patch_product_name = patch_entry['name'].strip()
         patch_os = patch_entry['os']
         patch_language = patch_entry['language']
-        patch_version = patch_entry['version'].strip()
+        try:
+            patch_version = patch_entry['version'].strip()
+        except AttributeError:
+            patch_version = None
         #replace blank patch version with None (blanks happens with patches, but not with installers)
         if patch_version == '': patch_version = None
         patch_total_size = patch_entry['total_size']
@@ -655,33 +682,50 @@ def gog_files_extract_parser(db_connection, product_id):
             patch_file_size = patch_file['size']
                 
             if patch_version is not None:
-                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
-                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, patch_id, patch_os, patch_language, patch_version, patch_file_id, patch_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
-                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ?', 
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, patch_id, patch_os, patch_language, patch_file_id, patch_file_size))
                 
-            existing_entries = db_cursor.fetchone()[0]
+            entry_pk = db_cursor.fetchone()
             
-            if existing_entries == 0:
-                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type,
+            if entry_pk is None:
+                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
                 #gf_id, gf_name, gf_os, gf_language, gf_version,
                 #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'patch', 
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'patch', 
                                                        patch_id, patch_product_name, patch_os, patch_language, patch_version,
                                                        None, None, patch_total_size, patch_file_id, patch_file_size))
                 #no need to print the os here, as it's included in the patch_id
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {patch_product_name}, {patch_id}, {patch_version}.')
+            
+            else:
+                logger.debug(f'FQ >>> Found an existing entry for {product_id}: {patch_product_name}, {patch_id}, {patch_version}.')
+                listed_patch_pks.remove(entry_pk[0])
+                
+    if len(listed_patch_pks) > 0:
+        for removed_pk in listed_patch_pks:
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+        
+        logger.info(f'FQ --- Marked some patch entries as removed for {product_id}')
     
     #process language_packs entries
+    db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
+                      'AND gf_int_download_type = "language_packs" AND gf_int_removed IS NULL', (product_id,))
+    listed_language_packs_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
+    
     for language_pack_entry in json_parsed_language_packs:
         language_pack_id = language_pack_entry['id']
         language_pack_product_name = language_pack_entry['name'].strip()
         language_pack_os = language_pack_entry['os']
         language_pack_language = language_pack_entry['language']
-        language_pack_version = language_pack_entry['version'].strip()
+        try:
+            language_pack_version = language_pack_entry['version'].strip()
+        except AttributeError:
+            language_pack_version = None
         language_pack_total_size = language_pack_entry['total_size']
         
         for language_pack_file in language_pack_entry['files']:
@@ -689,29 +733,43 @@ def gog_files_extract_parser(db_connection, product_id):
             language_pack_file_size = language_pack_file['size']
                 
             if language_pack_version is not None:
-                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
-                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ?', 
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, language_pack_id, language_pack_os, language_pack_language, language_pack_version, 
                                    language_pack_file_id, language_pack_file_size))
             else:
-                db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
-                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ?', 
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
+                                  'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, language_pack_id, language_pack_os, language_pack_language, 
                                    language_pack_file_id, language_pack_file_size))
                 
-            existing_entries = db_cursor.fetchone()[0]
+            entry_pk = db_cursor.fetchone()
             
-            if existing_entries == 0:
-                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type, gf_id,
+            if entry_pk is None:
+                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, gf_id,
                 #gf_name, gf_os, gf_language, gf_version,
                 #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'language_packs', language_pack_id, 
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'language_packs', language_pack_id, 
                                                        language_pack_product_name, language_pack_os, language_pack_language, language_pack_version,
                                                        None, None, language_pack_total_size, language_pack_file_id, language_pack_file_size))
                 #no need to print the os here, as it's included in the patch_id
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {language_pack_product_name}, {language_pack_id}, {language_pack_version}.')
                 
+            else:
+                logger.debug(f'FQ >>> Found an existing entry for {product_id}: {language_pack_product_name}, {language_pack_id}, {language_pack_version}.')
+                listed_language_packs_pks.remove(entry_pk[0])
+                
+    if len(listed_language_packs_pks) > 0:
+        for removed_pk in listed_language_packs_pks:
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+        
+        logger.info(f'FQ --- Marked some language_pack entries as removed for {product_id}')
+                
     #process bonus_content entries
+    db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
+                      'AND gf_int_download_type = "bonus_content" AND gf_int_removed IS NULL', (product_id,))
+    listed_bonus_content_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
+    
     for bonus_content_entry in json_parsed_bonus_content:
         bonus_content_id = bonus_content_entry['id']
         bonus_content_product_name = bonus_content_entry['name'].strip()
@@ -724,22 +782,32 @@ def gog_files_extract_parser(db_connection, product_id):
             bonus_content_file_id = bonus_content_file['id']
             bonus_content_file_size = bonus_content_file['size']
             
-            db_cursor.execute('SELECT COUNT(*) FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "bonus_content" AND gf_id = ? '
-                              'AND gf_type = ? AND gf_count = ? AND gf_file_id = ? AND gf_file_size = ?', 
+            db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "bonus_content" AND gf_id = ? '
+                              'AND gf_type = ? AND gf_count = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                               (product_id, bonus_content_id, bonus_content_type, bonus_content_count, bonus_content_file_id, bonus_content_file_size))
-                
-            existing_entries = db_cursor.fetchone()[0]
             
-            if existing_entries == 0:
-                #gf_int_nr, gf_int_added, gf_int_id, gf_int_download_type,
+            entry_pk = db_cursor.fetchone()
+            
+            if entry_pk is None:
+                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
                 #gf_id, gf_name, gf_os, gf_language, gf_version,
                 #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), product_id, 'bonus_content', 
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'bonus_content', 
                                                        bonus_content_id, bonus_content_product_name, None, None, None,
                                                        bonus_content_type, bonus_content_count, bonus_content_total_size, 
                                                        bonus_content_file_id, bonus_content_file_size))
                 #print the entry type, since bonus_content entries are not versioned
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {bonus_content_product_name}, {bonus_content_id}, {bonus_content_type}.')
+                
+            else:
+                logger.debug(f'FQ >>> Found an existing entry for {product_id}: {bonus_content_product_name}, {bonus_content_id}, {bonus_content_type}.')
+                listed_bonus_content_pks.remove(entry_pk[0])
+                
+    if len(listed_bonus_content_pks) > 0:
+        for removed_pk in listed_bonus_content_pks:
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+        
+        logger.info(f'FQ --- Marked some bonus_content entries as removed for {product_id}')
                 
     #batch commit
     db_connection.commit()

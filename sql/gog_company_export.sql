@@ -1,1 +1,2 @@
-SELECT gc_name AS Company, gc_int_added AS Added FROM gog_companies ORDER BY 1
+SELECT gc_name AS "Developer/Publisher" FROM gog_companies 
+WHERE gc_int_delisted IS NULL ORDER BY 1

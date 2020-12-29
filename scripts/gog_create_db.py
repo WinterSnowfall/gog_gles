@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.20
-@date: 11/12/2020
+@version: 2.30
+@date: 23/12/2020
 
 Warning: Built for use with python 3.6+
 '''
@@ -32,6 +32,7 @@ CREATE_GOG_COMPANIES_QUERY = ('CREATE TABLE gog_companies (gc_int_nr INTEGER PRI
 
 CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                           'gf_int_added TEXT NOT NULL, '
+                          'gf_int_removed TEXT, '
                           'gf_int_id INTEGER NOT NULL, '
                           'gf_int_download_type TEXT NOT NULL, '
                           'gf_id INTEGER NOT NULL, '
