@@ -2,7 +2,7 @@
 '''
 @author: Winter Snowfall
 @version: 2.30
-@date: 23/12/2020
+@date: 14/02/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -46,8 +46,11 @@ log_file_full_path = path.join('..', 'logs', 'gog_products_scan.log')
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
-logging.basicConfig(format=logger_format, level=logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+#logging level for other modules
+logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
+#logging level for current logger
+logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
