@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.30
-@date: 14/02/2021
+@version: 2.40
+@date: 20/03/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -17,12 +17,12 @@ import logging
 import argparse
 import difflib
 import re
+import os
 from sys import argv
 from shutil import copy2
 from configparser import ConfigParser
 from html2text import html2text
 from datetime import datetime
-from os import path
 from time import sleep
 from queue import Queue
 from collections import OrderedDict
@@ -39,10 +39,10 @@ terminate_signal = False
 reset_id = True
 
 ##conf file block
-conf_file_full_path = path.join('..', 'conf', 'gog_products_scan.conf')
+conf_file_full_path = os.path.join('..', 'conf', 'gog_products_scan.conf')
 
 ##logging configuration block
-log_file_full_path = path.join('..', 'logs', 'gog_products_scan.log')
+log_file_full_path = os.path.join('..', 'logs', 'gog_products_scan.log')
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
@@ -54,7 +54,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
 INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
@@ -206,9 +206,8 @@ def gog_product_v2_query(product_id, session, db_connection):
                 #calculate the diff between the new json and the previous one
                 #(applying the diff on the new json will revert to the previous version)
                 if existing_v2_json_formatted is not None:
-                    diff_v2_formatted = ''
-                    for line in difflib.unified_diff(json_v2_formatted.splitlines(1), existing_v2_json_formatted.splitlines(1), n=0):
-                        diff_v2_formatted = ''.join((diff_v2_formatted, line))
+                    diff_v2_formatted = ''.join([line for line in difflib.unified_diff(json_v2_formatted.splitlines(1), 
+                                                                                       existing_v2_json_formatted.splitlines(1), n=0)])
                 else:
                     diff_v2_formatted = None
                     
@@ -403,9 +402,8 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         #calculate the diff between the new json and the previous one
                         #(applying the diff on the new json will revert to the previous version)
                         if existing_json_formatted is not None:
-                            diff_formatted = ''
-                            for line in difflib.unified_diff(json_formatted.splitlines(1), existing_json_formatted.splitlines(1), n=0):
-                                diff_formatted = ''.join((diff_formatted, line))
+                            diff_formatted = ''.join([line for line in difflib.unified_diff(json_formatted.splitlines(1), 
+                                                                                            existing_json_formatted.splitlines(1), n=0)])
                         else:
                             diff_formatted = None
                         
@@ -985,7 +983,7 @@ if len(argv) > 1:
 
 if conf_backup:
     #conf file check/backup section
-    if path.exists(conf_file_full_path):
+    if os.path.exists(conf_file_full_path):
         #create a backup of the existing conf file - mostly for debugging/recovery
         copy2(conf_file_full_path, conf_file_full_path + '.bak')
         logger.info('Successfully created conf file backup.')
@@ -995,7 +993,7 @@ if conf_backup:
 
 if db_backup:
     #db file check/backup section
-    if path.exists(db_file_full_path):
+    if os.path.exists(db_file_full_path):
         #create a backup of the existing db - mostly for debugging/recovery
         copy2(db_file_full_path, db_file_full_path + '.bak')
         logger.info('Successfully created db backup.')
@@ -1035,7 +1033,7 @@ if scan_mode == 'full':
         for thread_no in range(CONNECTION_THREADS):
             #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
             THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
-            thread_no_nice = ''.join((THREAD_LOGGING_FILLER, str(thread_no + 1)))
+            thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
             
             logger.info(f'Starting thread T#{thread_no_nice}...')
             #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups

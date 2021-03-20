@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.30
-@date: 14/02/2021
+@version: 2.40
+@date: 20/03/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,9 +13,9 @@ import sqlite3
 import requests
 import logging
 import argparse
+import os
 from shutil import copy2
 from configparser import ConfigParser
-from os import path
 from datetime import datetime
 from collections import OrderedDict
 from lxml import html as lhtml
@@ -27,10 +27,10 @@ from logging.handlers import RotatingFileHandler
 configParser = ConfigParser()
 
 ##conf file block
-conf_file_full_path = path.join('..', 'conf', 'gog_company_scan.conf')
+conf_file_full_path = os.path.join('..', 'conf', 'gog_company_scan.conf')
 
 ##logging configuration block
-log_file_full_path = path.join('..', 'logs', 'gog_company_scan.log')
+log_file_full_path = os.path.join('..', 'logs', 'gog_company_scan.log')
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
@@ -42,7 +42,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
 OPTIMIZE_QUERY = 'PRAGMA optimize'
@@ -125,7 +125,7 @@ def gog_company_query(company_url):
                         #delist companies which are no longer in the scraped company_values list
                         if company not in company_values:
                             if existing_delisted is None:
-                                logger.warning(f'CQ >>> Company {company} has been delisted...')
+                                logger.debug(f'CQ >>> Company {company} has been delisted...')
                                 db_cursor.execute('UPDATE gog_companies SET gc_int_delisted = ? WHERE gc_name = ?', (datetime.now(), company))
                                 db_connection.commit()
                                 logger.info(f'CQ --- Updated the DB entry for: {company}.')
@@ -181,7 +181,7 @@ except:
 
 if db_backup:
     #db file check/backup section
-    if path.exists(db_file_full_path):
+    if os.path.exists(db_file_full_path):
         #create a backup of the existing db - mostly for debugging/recovery
         copy2(db_file_full_path, db_file_full_path + '.bak')
         logger.info('Successfully created DB backup.')

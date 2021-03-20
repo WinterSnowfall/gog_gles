@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.30
-@date: 14/02/2021
+@version: 2.40
+@date: 20/03/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -10,7 +10,7 @@ Warning: Built for use with python 3.6+
 import sqlite3
 import logging
 import argparse
-from os import path
+import os
 from sys import argv
 from datetime import datetime
 from datetime import timedelta
@@ -25,7 +25,7 @@ from matplotlib.ticker import ScalarFormatter
 file_date = datetime.now().strftime('%Y%m%d')
 
 ##logging configuration block
-log_file_full_path = path.join('..', 'logs', 'gog_plot_gen.log')
+log_file_full_path = os.path.join('..', 'logs', 'gog_plot_gen.log')
 logger_file_handler = logging.FileHandler(log_file_full_path, mode='w', encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
@@ -37,7 +37,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
 OPTIMIZE_QUERY = 'PRAGMA optimize'
@@ -151,7 +151,7 @@ def plot_id_timeline(mode, db_connection):
     pyplot.tight_layout(5,1,0)
     
     pyplot.ioff()
-    pyplot.savefig(path.join('..', 'output_plot', ''.join((window_title, '.png'))))
+    pyplot.savefig(os.path.join('..', 'output_plot', window_title + '.png'))
     #uncomment for debugging purposes only
     #pyplot.show()
         
@@ -217,7 +217,7 @@ def plot_id_distribution(mode, db_connection):
     pyplot.tight_layout(5,1,0)
     
     pyplot.ioff()
-    pyplot.savefig(path.join('..', 'output_plot', ''.join((window_title, '.png'))))
+    pyplot.savefig(os.path.join('..', 'output_plot', window_title + '.png'))
     #uncomment for debugging purposes only
     #pyplot.show()
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.30
-@date: 14/02/2021
+@version: 2.40
+@date: 20/03/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -12,11 +12,11 @@ import sqlite3
 import requests
 import logging
 import argparse
+import os
 from sys import argv
 from shutil import copy2
 from configparser import ConfigParser
 from datetime import datetime
-from os import path
 from time import sleep
 from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
@@ -29,10 +29,10 @@ terminate_signal = False
 reset_id = True
 
 ##conf file block
-conf_file_full_path = path.join('..', 'conf', 'gog_prices_scan.conf')
+conf_file_full_path = os.path.join('..', 'conf', 'gog_prices_scan.conf')
 
 ##logging configuration block
-log_file_full_path = path.join('..', 'logs', 'gog_prices_scan.log')
+log_file_full_path = os.path.join('..', 'logs', 'gog_prices_scan.log')
 logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
@@ -44,7 +44,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
 INSERT_PRICES_QUERY = 'INSERT INTO gog_prices VALUES (?,?,?,?,?,?,?,?,?)'
@@ -192,7 +192,7 @@ if len(argv) > 1:
 
 if conf_backup:
     #conf file check/backup section
-    if path.exists(conf_file_full_path):
+    if os.path.exists(conf_file_full_path):
         #create a backup of the existing conf file - mostly for debugging/recovery
         copy2(conf_file_full_path, conf_file_full_path + '.bak')
         logger.info('Successfully created conf file backup.')
@@ -202,7 +202,7 @@ if conf_backup:
 
 if db_backup:
     #db file check/backup section
-    if path.exists(db_file_full_path):
+    if os.path.exists(db_file_full_path):
         #create a backup of the existing db - mostly for debugging/recovery
         copy2(db_file_full_path, db_file_full_path + '.bak')
         logger.info('Successfully created db backup.')

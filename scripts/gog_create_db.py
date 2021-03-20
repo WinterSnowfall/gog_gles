@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.30
-@date: 14/02/2021
+@version: 2.40
+@date: 20/03/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -10,10 +10,10 @@ Warning: Built for use with python 3.6+
 import sqlite3
 import logging
 import argparse
-from os import path
+import os
 
 ##logging configuration block
-log_file_full_path = path.join('..', 'logs', 'gog_create_db.log')
+log_file_full_path = os.path.join('..', 'logs', 'gog_create_db.log')
 logger_file_handler = logging.FileHandler(log_file_full_path, mode='w', encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
@@ -25,7 +25,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
 CREATE_GOG_COMPANIES_QUERY = ('CREATE TABLE gog_companies (gc_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -104,7 +104,7 @@ parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_visor)
 args = parser.parse_args()
 
 #db file check/creation section
-if not path.exists(db_file_full_path):
+if not os.path.exists(db_file_full_path):
     logger.info('No DB file detected. Creating new SQLite DB...')
     
     with sqlite3.connect(db_file_full_path) as db_connection:
