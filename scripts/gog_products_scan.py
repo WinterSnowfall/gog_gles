@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.40
-@date: 20/03/2021
+@version: 2.50
+@date: 23/09/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -344,17 +344,9 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 #detect if the entry is a movie based on the links_forum value and then on the content of the 
                 #lead description field, since the APIs ofer no discrimination (it's not pretty, but it works)
                 if ((links_forum == 'https://www.gog.com/forum/movies' or 
-                   (description_lead is not None and description_lead.startswith('IMDB rating:')) or
-                   #workaround for 'Deliverance: The Making of Kingdom Come'
-                   product_id == 1161629383 or 
-                   #workaround for 'Mars'
-                   product_id == 1207666543 or 
-                   #workaround for 'Fechtbuch: The Real Swordfighting behind Kingdom Come'
-                   product_id == 2125927245) and not 
-                   #workaround to exclude 'Double Fine Adventure Definitive Edition'
-                   (product_id == 1691391100 or
-                   #workaround to exclude 'Double Fine Adventure Additional Content'
-                   product_id == 1394340350)):
+                   (description_lead is not None and description_lead.startswith('IMDB rating:')) or 
+                   product_id in STATIC_MOVIES_ID_LIST) 
+                   and not product_id in STATIC_NON_MOVIES_ID_LIST):
                     is_movie = True
                                 
             if entry_count == 0:
@@ -378,6 +370,14 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                                                         description_full, description_cool, changelog))
                     db_connection.commit()
                 logger.info(f'PQ +++ Added a new DB entry for {product_id}: {product_title}.')
+                
+                #movies do not have a valid v2 product API entry
+                if not is_movie:
+                    #call the v2 api query to save the v2 json payload and populate developer/publisher values
+                    gog_product_v2_query(product_id, session, db_connection)
+                    #fall back to website scraping of developer/publisher values for movies
+                elif links_forum is not None:
+                    gog_product_company_query(product_id, session, db_connection, links_forum.replace('/game/', '/movie/'))
             
             elif entry_count == 1:
                 #do not update existing entries in a full scan, since update/delta scans will take care of that
@@ -421,13 +421,13 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                             db_connection.commit()
                         logger.info(f'PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
             
-            #movies do not have a valid v2 product API entry
-            if not is_movie:
-                #call the v2 api query to save the v2 json payload and populate developer/publisher values
-                gog_product_v2_query(product_id, session, db_connection)
-            #fall back to website scraping of developer/publisher values for movies
-            elif links_forum is not None:
-                gog_product_company_query(product_id, session, db_connection, links_forum.replace('/game/', '/movie/'))
+                    #movies do not have a valid v2 product API entry
+                    if not is_movie:
+                        #call the v2 api query to save the v2 json payload and update developer/publisher values
+                        gog_product_v2_query(product_id, session, db_connection)
+                    #fall back to website scraping of developer/publisher values for movies
+                    elif links_forum is not None:
+                        gog_product_company_query(product_id, session, db_connection, links_forum.replace('/game/', '/movie/'))
                             
         #existing ids return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
@@ -454,15 +454,15 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             raise Exception()
         
         return True
-        
-    #sometimes the HTTPS connection gets rejected/terminated
-    except requests.exceptions.ConnectionError:
-        logger.warning(f'PQ >>> Connection error encountered for {product_id}.')
-        return False
-    
+
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'PQ >>> Connection SSL error encountered for {product_id}.')
+        return False
+            
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.warning(f'PQ >>> Connection error encountered for {product_id}.')
         return False
             
     except:
@@ -522,15 +522,15 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
             raise Exception()
         
         return totalPages
-                
-    #sometimes the HTTPS connection gets rejected/terminated
-    except requests.exceptions.ConnectionError:
-        logger.warning(f'GQ >>> Connection error encountered for {product_id}.')
-        return 0
     
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'GQ >>> Connection SSL error encountered for {product_id}.')
+        return 0
+    
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.warning(f'GQ >>> Connection error encountered for {product_id}.')
         return 0
     
     except:
@@ -861,14 +861,14 @@ def gog_products_bulk_query(product_id, scan_mode, session, db_connection):
                 
         return True
     
-    #sometimes the HTTPS connection gets rejected/terminated
-    except requests.exceptions.ConnectionError:
-        logger.warning(f'BQ >>> Connection error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
-        return False
-    
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'BQ >>> Connection SSL error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+        return False
+    
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.warning(f'BQ >>> Connection error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
         return False
     
     except:
@@ -958,6 +958,12 @@ try:
     RETRY_COUNT = general_section.getint('retry_count')
     RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
     RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
+    #used as a workaround in movies detection logic - ids will always be treated as movies
+    STATIC_MOVIES_ID_LIST= [int(product_id.strip()) for product_id in 
+                            general_section.get('static_movies_id_list').split(',')]
+    #used as a workaround in movies detection logic - ids will always be treated as non-movies
+    STATIC_NON_MOVIES_ID_LIST = [int(product_id.strip()) for product_id in 
+                                 general_section.get('static_non_movies_id_list').split(',')]
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise SystemExit(1)
@@ -1070,7 +1076,7 @@ if scan_mode == 'full':
             terminate_sync_counter += 1
         
         if terminate_sync_counter > THREAD_SYNC_TIMEOUT:
-            logger.warn('Thread sync on exit interval exceeded! Any stuck threads will now be terminated.')
+            logger.warning('Thread sync on exit interval exceeded! Any stuck threads will now be terminated.')
         
 elif scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
@@ -1133,7 +1139,6 @@ elif scan_mode == 'update':
             
     except KeyboardInterrupt:
         reset_id = False
-        pass
     
 elif scan_mode == 'new':
     logger.info('--- Running in NEW scan mode ---')
@@ -1172,8 +1177,8 @@ elif scan_mode == 'manual':
     
     manual_scan_section = configParser['MANUAL_SCAN']
     #load the product id list to process
-    product_id_list = manual_scan_section.get('id_list')
-    product_id_list = [int(product_id.strip()) for product_id in product_id_list.split(',')]
+    product_id_list = [int(product_id.strip()) for product_id in 
+                       manual_scan_section.get('id_list').split(',')]
     
     try:
         with requests.Session() as session:

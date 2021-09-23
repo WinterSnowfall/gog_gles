@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.40
-@date: 20/03/2021
+@version: 2.50
+@date: 23/09/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -144,13 +144,13 @@ def gog_company_query(company_url):
                 logger.error(f'CQ >>> HTTP error code {response.status_code} received. Aborting!')
                 raise Exception()
             
-    #sometimes the HTTPS connection gets rejected/terminated
-    except requests.exceptions.ConnectionError:
-        logger.critical(f'CQ >>> Connection error encountered. Aborting!')
-    
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.critical(f'CQ >>> Connection SSL error encountered. Aborting!')
+        
+    #sometimes the HTTPS connection gets rejected/terminated
+    except requests.exceptions.ConnectionError:
+        logger.critical(f'CQ >>> Connection error encountered. Aborting!')
     
     except:
         logger.critical('CQ >>> Company query has failed. Aborting!')

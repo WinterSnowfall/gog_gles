@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.40
-@date: 20/03/2021
+@version: 2.50
+@date: 23/09/2021
 
 Warning: Built for use with python 3.6+
 '''
@@ -130,16 +130,16 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
             raise Exception()
         
         return True
+        
+    #sometimes the HTTPS connection encounters SSL errors
+    except requests.exceptions.SSLError:
+        logger.warning(f'PQ >>> Connection SSL error encountered for {product_id}.')
+        
+        return False
     
     #sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'PQ >>> Connection error encountered for {product_id}.')
-        
-        return False
-    
-    #sometimes the HTTPS connection encounters SSL errors
-    except requests.exceptions.SSLError:
-        logger.warning(f'PQ >>> Connection SSL error encountered for {product_id}.')
         
         return False
     
