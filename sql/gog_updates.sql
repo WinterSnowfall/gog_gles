@@ -9,3 +9,4 @@ WHERE gp_id = gf_int_product_id AND gf_int_added LIKE DATE('now', 'localtime', '
 -- ids that have been removed (optional)
 SELECT gp_int_no_longer_listed, gp_int_added, gp_id, gp_title, gp_int_product_url FROM gog_products 
 WHERE gp_int_no_longer_listed LIKE DATE('now', 'localtime', 'start of day') || '%' ORDER BY 1 DESC
+

@@ -2,8 +2,6 @@
 
 cd scripts
 
-python3 gog_company_scan.py
-
 python3 gog_products_scan.py -n
 python3 gog_products_scan.py -t
 python3 gog_products_scan.py -u

@@ -28,11 +28,6 @@ logger.addHandler(logger_file_handler)
 db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
 
 ##CONSTANTS
-CREATE_GOG_COMPANIES_QUERY = ('CREATE TABLE gog_companies (gc_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
-                              'gc_int_added TEXT NOT NULL, '
-                              'gc_int_delisted TEXT, '
-                              'gc_name TEXT UNIQUE NOT NULL)')
-
 CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                           'gf_int_added TEXT NOT NULL, '
                           'gf_int_removed TEXT, '
@@ -109,7 +104,6 @@ if not os.path.exists(db_file_full_path):
     
     with sqlite3.connect(db_file_full_path) as db_connection:
         db_cursor = db_connection.cursor()
-        db_cursor.execute(CREATE_GOG_COMPANIES_QUERY)
         db_cursor.execute(CREATE_GOG_FILES_QUERY)
         db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
         db_cursor.execute(CREATE_GOG_PRICES_QUERY)
