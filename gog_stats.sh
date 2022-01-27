@@ -8,3 +8,4 @@ python3 gog_plot_gen.py -d
 #python3 gog_plot_gen.py -i
 
 cd ..
+

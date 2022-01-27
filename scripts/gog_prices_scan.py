@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.50
-@date: 23/09/2021
+@version: 2.60
+@date: 27/01/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -169,8 +169,8 @@ try:
     configParser.read(conf_file_full_path)
     general_section = configParser['GENERAL']
     #parsing generic parameters
-    conf_backup = general_section.getboolean('conf_backup')
-    db_backup = general_section.getboolean('db_backup')
+    conf_backup = general_section.get('conf_backup')
+    db_backup = general_section.get('db_backup')
     scan_mode = general_section.get('scan_mode')
     country_code = general_section.get('country_code')
     currencies_list = general_section.get('currencies_list')
@@ -190,8 +190,8 @@ if len(argv) > 1:
     elif args.archive:
         scan_mode = 'archive'
 
-if conf_backup:
-    #conf file check/backup section
+#boolean 'true' or scan_mode specific activation
+if conf_backup == 'true' or conf_backup == scan_mode:
     if os.path.exists(conf_file_full_path):
         #create a backup of the existing conf file - mostly for debugging/recovery
         copy2(conf_file_full_path, conf_file_full_path + '.bak')
@@ -200,8 +200,8 @@ if conf_backup:
         logger.critical('Could find specified conf file!')
         raise SystemExit(2)
 
-if db_backup:
-    #db file check/backup section
+#boolean 'true' or scan_mode specific activation
+if db_backup == 'true' or db_backup == scan_mode:
     if os.path.exists(db_file_full_path):
         #create a backup of the existing db - mostly for debugging/recovery
         copy2(db_file_full_path, db_file_full_path + '.bak')

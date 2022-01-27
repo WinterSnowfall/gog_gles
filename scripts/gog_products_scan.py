@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.50
-@date: 23/09/2021
+@version: 2.60
+@date: 27/01/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -95,8 +95,6 @@ INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
 
-ADALIA_MISSING_URL = 'https://gog.bigpizzapies.com/missingUrls.json'
-ADALIA_LEGACY_URL = 'https://gog.bigpizzapies.com/legacyUrls.json'
 #number of retries after which an id is considered parmenently delisted (for archive mode)
 ARCHIVE_NO_OF_RETRIES = 3
 #static regex pattern for endline fixing of extra description/changelog whitespace
@@ -376,8 +374,8 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     #call the v2 api query to save the v2 json payload and populate developer/publisher values
                     gog_product_v2_query(product_id, session, db_connection)
                     #fall back to website scraping of developer/publisher values for movies
-                elif links_forum is not None:
-                    gog_product_company_query(product_id, session, db_connection, links_forum.replace('/game/', '/movie/'))
+                elif links_product_card is not None:
+                    gog_product_company_query(product_id, session, db_connection, links_product_card.replace('/game/', '/movie/'))
             
             elif entry_count == 1:
                 #do not update existing entries in a full scan, since update/delta scans will take care of that
@@ -426,8 +424,8 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         #call the v2 api query to save the v2 json payload and update developer/publisher values
                         gog_product_v2_query(product_id, session, db_connection)
                     #fall back to website scraping of developer/publisher values for movies
-                    elif links_forum is not None:
-                        gog_product_company_query(product_id, session, db_connection, links_forum.replace('/game/', '/movie/'))
+                    elif links_product_card is not None:
+                        gog_product_company_query(product_id, session, db_connection, links_product_card.replace('/game/', '/movie/'))
                             
         #existing ids return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
@@ -538,60 +536,6 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
         #uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         return 0
-    
-def gog_products_third_party_query(third_party_url, scan_mode, session, db_connection):
-    
-    logger.info(f'TQ >>> Querying url: {third_party_url}.')
-    
-    try:
-        response = session.get(third_party_url, timeout=HTTP_TIMEOUT)
-            
-        logger.debug(f'TQ >>> HTTP response code: {response.status_code}.')
-            
-        if response.status_code == 200:
-            json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
-            db_cursor = db_connection.cursor()
-            
-            for extra_id_raw in json_parsed:
-                extra_id = extra_id_raw.strip()
-                if extra_id == '': extra_id = None
-                
-                logger.debug(f'TQ >>> Picked up the following product id: {extra_id}.')
-                
-                #at least one of the ids is null for some reason, so do check
-                if extra_id is not None:
-                    db_cursor.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', (extra_id, ))
-                    entry_count = db_cursor.fetchone()[0]
-                    
-                    #only run a product scan if a new id was detected
-                    if entry_count == 0:
-                        logger.debug(f'TQ >>> Unknown id detected! Running scan for {extra_id}.')
-                        retries_complete = False
-                        retry_counter = 0
-                            
-                        while not retries_complete:
-                            if retry_counter > 0:
-                                logger.warning(f'TQ >>> Reprocessing id {extra_id}...')
-                                #allow a short respite before re-processing
-                                sleep(2)
-                            
-                            retries_complete = gog_product_extended_query(extra_id, scan_mode, session, db_connection)
-                            
-                            if not retries_complete:
-                                retry_counter += 1
-                    
-                    else:
-                        logger.debug('TQ >>> The id is already present in the gog_products table. Skipping!')
-                 
-        else:
-            logger.warning(f'TQ >>> HTTP error code {response.status_code} received.')
-            raise Exception()
-    
-    except:
-        logger.critical('TQ >>> Processing has failed!')
-        #uncomment for debugging purposes only
-        #logger.error(traceback.format_exc())
-        raise
         
 def gog_files_extract_parser(db_connection, product_id):
     
@@ -937,7 +881,6 @@ group.add_argument('-n', '--new', help='Query new products', action='store_true'
 group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
 group.add_argument('-f', '--full', help='Perform a full products scan using the Galaxy products endpoint', action='store_true')
 group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
-group.add_argument('-t', '--third_party', help='Perform a third-party (Adalia Fundamentals) products scan', action='store_true')
 group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
 group.add_argument('-d', '--delisted', help='Perform a scan on all the delisted products', action='store_true')
 
@@ -950,8 +893,8 @@ try:
     configParser.read(conf_file_full_path)
     general_section = configParser['GENERAL']
     #parsing generic parameters
-    conf_backup = general_section.getboolean('conf_backup')
-    db_backup = general_section.getboolean('db_backup')
+    conf_backup = general_section.get('conf_backup')
+    db_backup = general_section.get('db_backup')
     scan_mode = general_section.get('scan_mode')
     #parsing constants
     HTTP_TIMEOUT = general_section.getint('http_timeout')
@@ -980,15 +923,13 @@ if len(argv) > 1:
         scan_mode = 'full'
     elif args.manual:
         scan_mode = 'manual'
-    elif args.third_party:
-        scan_mode = 'third_party'
     elif args.extract:
         scan_mode = 'extract'
     elif args.delisted:
         scan_mode = 'delisted'
 
-if conf_backup:
-    #conf file check/backup section
+#boolean 'true' or scan_mode specific activation
+if conf_backup == 'true' or conf_backup == scan_mode:
     if os.path.exists(conf_file_full_path):
         #create a backup of the existing conf file - mostly for debugging/recovery
         copy2(conf_file_full_path, conf_file_full_path + '.bak')
@@ -997,8 +938,8 @@ if conf_backup:
         logger.critical('Could find specified conf file!')
         raise SystemExit(2)
 
-if db_backup:
-    #db file check/backup section
+#boolean 'true' or scan_mode specific activation
+if db_backup == 'true' or db_backup == scan_mode:
     if os.path.exists(db_file_full_path):
         #create a backup of the existing db - mostly for debugging/recovery
         copy2(db_file_full_path, db_file_full_path + '.bak')
@@ -1205,25 +1146,6 @@ elif scan_mode == 'manual':
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
     
-    except KeyboardInterrupt:
-        pass
-    
-#run product scans against adalia fundamentals tracked ids and potentially other third party lists
-elif scan_mode == 'third_party':
-    logger.info('--- Running in THIRD PARTY scan mode ---')
-    
-    try:
-        with requests.Session() as session:
-            with sqlite3.connect(db_file_full_path) as db_connection:
-                #gracefully provided by adaliabooks
-                #ids which are probably bundeled - adalia fundamentals
-                gog_products_third_party_query(ADALIA_MISSING_URL, scan_mode, session, db_connection)
-                #all the ids in the catalog - adalia fundamentals
-                gog_products_third_party_query(ADALIA_LEGACY_URL, scan_mode, session, db_connection)
-                
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
-            
     except KeyboardInterrupt:
         pass
     
