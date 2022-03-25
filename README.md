@@ -1,7 +1,7 @@
-# gog_visor
+# gog_gles
 A collection of scripts that call publicly available GOG APIs in order to keep track of game, installer and pricing updates.
 
-## What does Visor do?
+## What does gog_gles do?
 
 It provides several python3 scripts which call publicly available GOG APIs in order to collect product data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to game cards, changelogs, installers/files and prices.
 
@@ -21,19 +21,19 @@ sudo apt-get install python3-html2text python3-requests python3-lxml python3-mat
 cd scripts
 ```
 
-**4.** Create the Visor SQLite database, along with the appropriate tables and other artifacts, by running:
+**4.** Create the gog_gles SQLite database, along with the appropriate tables and other artifacts, by running:
 ```
 python3 gog_create_db.py
 ```
 
 The database will be created in the *output_db* folder.
 
-**5.** Do a manual scan to populate the Visor database with the first 10 ids (to skip the gap between id 10 and the next populated id at ~1070000000):
+**5.** Do a manual scan to populate the gog_gles database with the first 10 ids (to skip the gap between id 10 and the next populated id at ~1070000000):
 ```
 python3 gog_products_scan.py -m
 ```
 
-**6.** Do an initial full scan to populate the Visor database with current game ids (note that this will scan the entire GOG id range from 1070000000 to 2147483647 and may take about a week to complete):
+**6.** Do an initial full scan to populate the gog_gles database with current game ids (note that this will scan the entire GOG id range from 1070000000 to 2147483647 and may take about a week to complete):
 ```
 python3 gog_products_scan.py -f
 ```
@@ -68,7 +68,7 @@ All you need to do is run the provided update bash script:
 
 Wait for the script to finish collecting all the required data.
 
-You can now run the provided SQL queries against the *gog_visor.db* file to list the updates. The queries are included in the sql script file (*sql\gog_updates.sql*). Any SQLite client can be used to this purpose. I personally recommend getting **DB Browser for SQLite**: https://sqlitebrowser.org/.
+You can now run the provided SQL queries against the *gog_gles.db* file to list the updates. The queries are included in the sql script file (*sql\gog_updates.sql*). Any SQLite client can be used to this purpose. I personally recommend getting **DB Browser for SQLite**: https://sqlitebrowser.org/.
 
 ## What about pricing scans?
 
@@ -79,3 +79,4 @@ Pricing scans will automatically be triggered by update scans, as described abov
 ## Disclaimer
 
 I'm sure some may disagree with my style of coding or the lack of OOPness in my code. That's fair enough. Just FYI, I did not write these scripts with the intention of sharing them with anyone in particular (at least not initially), so you'll be bearing the full brunt of what I deemed was the most easily maintainable and hackable code I could write. Feel free to improve it as you see fit.
+

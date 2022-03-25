@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.60
-@date: 27/01/2022
+@version: 2.80
+@date: 21/03/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -44,7 +44,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 INSERT_PRICES_QUERY = 'INSERT INTO gog_prices VALUES (?,?,?,?,?,?,?,?,?)'
@@ -153,7 +153,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description=('GOG prices scan (part of gog_visor) - a script to call publicly available GOG APIs '
+parser = argparse.ArgumentParser(description=('GOG prices scan (part of gog_gles) - a script to call publicly available GOG APIs '
                                               'in order to retrieve product price information.'))
 
 group = parser.add_mutually_exclusive_group()
@@ -220,7 +220,7 @@ if scan_mode == 'update':
     last_id = update_scan_section.getint('last_id')
     
     if last_id > 0:
-        logger.info(f'Restarting full scan from id: {last_id}.')
+        logger.info(f'Restarting update scan from id: {last_id}.')
     
     try:
         logger.info('Starting full scan on all applicable DB entries...')

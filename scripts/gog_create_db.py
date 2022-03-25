@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.60
-@date: 27/01/2022
+@version: 2.80
+@date: 21/03/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -25,9 +25,23 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
+CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                           'gb_int_added TEXT NOT NULL, '
+                           'gb_int_updated TEXT, '
+                           'gb_int_json_payload TEXT NOT NULL, '
+                           'gb_int_json_diff TEXT, '
+                           'gb_int_id INTEGER NOT NULL, '
+                           'gb_int_title TEXT, '
+                           'gb_int_os TEXT NOT NULL, '
+                           'gb_total_count INTEGER NOT NULL, '
+                           'gb_count INTEGER NOT NULL, '
+                           'gb_main_version_names TEXT, '
+                           'gb_branch_version_names TEXT, '
+                           'gb_has_private_branches INTEGER NOT NULL)')
+
 CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                           'gf_int_added TEXT NOT NULL, '
                           'gf_int_removed TEXT, '
@@ -43,6 +57,16 @@ CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY
                           'gf_total_size INTEGER NOT NULL, '
                           'gf_file_id TEXT NOT NULL, '
                           'gf_file_size INTEGER NOT NULL)')
+
+CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                                     'gid_int_added TEXT NOT NULL, '
+                                     'gid_int_fixed TEXT, '
+                                     'gid_int_id INTEGER NOT NULL, '
+                                     'gid_int_title TEXT NOT NULL, '
+                                     'gid_int_os TEXT NOT NULL, '
+                                     'gid_int_latest_galaxy_build TEXT NOT NULL, '
+                                     'gid_int_latest_installer_version TEXT NOT NULL, '
+                                     'gid_int_false_positive INTEGER NOT NULL)')
 
 CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                            'gpr_int_added TEXT NOT NULL, '
@@ -90,11 +114,27 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_description_cool TEXT, '
                              'gp_changelog TEXT)')
 
+CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                             'gr_int_added TEXT NOT NULL, '
+                             'gr_int_delisted TEXT, '
+                             'gr_int_updated TEXT, '
+                             'gr_int_json_payload TEXT NOT NULL, '
+                             'gr_int_json_diff TEXT, '
+                             'gr_external_id INTEGER UNIQUE NOT NULL, '
+                             'gr_title TEXT, '
+                             'gr_type TEXT NOT NULL, '
+                             'gr_supported_oses TEXT, '
+                             'gr_genres TEXT, '
+                             'gr_series TEXT, '
+                             'gr_first_release_date TEXT, '
+                             'gr_visible_in_library INTEGER NOT NULL, '
+                             'gr_aggregated_rating REAL)')
+
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_visor) - a script to create the sqlite DB structure '
-                                              'for the other gog_visor utilities.'))
+parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_gles) - a script to create the sqlite DB structure '
+                                              'for the other gog_gles utilities.'))
 
 args = parser.parse_args()
 
@@ -104,11 +144,16 @@ if not os.path.exists(db_file_full_path):
     
     with sqlite3.connect(db_file_full_path) as db_connection:
         db_cursor = db_connection.cursor()
+        db_cursor.execute(CREATE_GOG_BUILDS_QUERY)
+        db_cursor.execute('CREATE UNIQUE INDEX gb_int_id_os_index ON gog_builds (gb_int_id, gb_int_os)')
         db_cursor.execute(CREATE_GOG_FILES_QUERY)
         db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
+        db_cursor.execute(CREATE_GOG_INSTALLERS_DELTA_QUERY)
+        db_cursor.execute('CREATE INDEX gid_int_id_os_index ON gog_installers_delta (gid_int_id, gid_int_os)')
         db_cursor.execute(CREATE_GOG_PRICES_QUERY)
         db_cursor.execute('CREATE INDEX gpr_int_id_index ON gog_prices (gpr_int_id)')
         db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
+        db_cursor.execute(CREATE_GOG_RELEASES_QUERY)
         db_connection.commit()
     
     logger.info('DB created successfully.')

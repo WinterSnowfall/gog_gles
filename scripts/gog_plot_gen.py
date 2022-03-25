@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.60
-@date: 27/01/2022
+@version: 2.80
+@date: 21/03/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -37,7 +37,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 OPTIMIZE_QUERY = 'PRAGMA optimize'
@@ -59,7 +59,7 @@ DARKNESS_CHART_COLORS = ['black', 'slategray', 'lightgray']
 CHART_LABELS = ['Type: game', 'Type: dlc', 'Type: pack']
 
 def plot_id_timeline(mode, db_connection):
-    pyplot.suptitle('gog_visor - GOG product id detection timeline (with id / detection date histograms)')
+    pyplot.suptitle('gog_gles - GOG product id detection timeline (with id / detection date histograms)')
     window_title = f'gog_{mode}_{file_date}'
     pyplot.gcf().canvas.set_window_title(window_title)
     pyplot.gcf().set_size_inches(PNG_WIDTH_INCHES, PNG_HEIGHT_INCHES)
@@ -181,11 +181,11 @@ def plot_id_distribution(mode, db_connection):
     pack_id_list = []
     
     if mode == 'distribution':
-        pyplot.suptitle(f'gog_visor - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (all ids)')
+        pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (all ids)')
         db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_delisted IS NULL ORDER BY 1', (CUTOFF_ID, ))
     else:
-        pyplot.suptitle(f'gog_visor - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (incremental ids)')
+        pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (incremental ids)')
         db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_added > ? AND gp_int_delisted IS NULL ORDER BY 1',
                                           (CUTOFF_ID, CUTOFF_DATE))
@@ -224,7 +224,7 @@ def plot_id_distribution(mode, db_connection):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description=('GOG plot generation (part of gog_visor) - a script to generate GOG-related '
+parser = argparse.ArgumentParser(description=('GOG plot generation (part of gog_gles) - a script to generate GOG-related '
                                               'statistics and charts.'))
 
 group = parser.add_mutually_exclusive_group()

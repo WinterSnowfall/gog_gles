@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.60
-@date: 27/01/2022
+@version: 2.80
+@date: 21/03/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -54,7 +54,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_visor.db')
+db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
@@ -99,6 +99,12 @@ OPTIMIZE_QUERY = 'PRAGMA optimize'
 ARCHIVE_NO_OF_RETRIES = 3
 #static regex pattern for endline fixing of extra description/changelog whitespace
 ENDLINE_FIX_REGEX = re.compile('([ ]*[\n]){2,}')
+#value separator for multi-valued fields
+MVF_VALUE_SEPARATOR = '; '
+#non-standard unicode values (either encoded or not) which need to be purged from the JSON API output;
+#the state of being encoded or not encoded in the original text output seems to depend on some form 
+#of unicode string black magic that I can't quite understand...
+JSON_UNICODE_FILTERED_VALUES = ('', '\\u0092', '\\u0093', '\\u0094', '\\u0097')
 
 #set the gog_lc cookie to avoid errors bought about by GOG dynamically determining the site language
 COOKIES = {
@@ -109,6 +115,14 @@ def sigterm_handler(signum, frame):
     logger.info('Stopping scan due to SIGTERM...')
     
     raise SystemExit(0)
+
+def terminate_script():
+    logger.critical('Forcefully stopping script...')
+    
+    #flush buffers
+    os.sync()
+    #forcefully terminate script process
+    os.kill(os.getpid(), signal.SIGKILL)
 
 def gog_product_company_query(product_id, session, db_connection, product_url):
     
@@ -191,7 +205,14 @@ def gog_product_v2_query(product_id, session, db_connection):
         if response.status_code == 200:
             logger.debug(f'2Q >>> Product v2 query for id {product_id} has returned a valid response...')
             
-            json_v2_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
+            #ignore unicode control characters which can be part of game descriptions and/or changelogs; 
+            #these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes  
+            #even with unicode conversions from and to the db... why do you do this, GOG, why???
+            filtered_response = response.text
+            for unicode_value in JSON_UNICODE_FILTERED_VALUES:
+                filtered_response = filtered_response.replace(unicode_value, '')
+
+            json_v2_parsed = json.loads(filtered_response, object_pairs_hook=OrderedDict)
             json_v2_formatted = json.dumps(json_v2_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
             
             db_cursor = db_connection.execute('SELECT gp_int_v2_json_payload FROM gog_products WHERE gp_id = ?', (product_id, ))
@@ -215,7 +236,7 @@ def gog_product_v2_query(product_id, session, db_connection):
                 developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
                 publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
                 #process tags
-                tags = ', '.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
+                tags = MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
                 if tags == '': tags = None
                 #process series - these may be 'null' and return a TypeError in such cases
                 try:
@@ -223,7 +244,7 @@ def gog_product_v2_query(product_id, session, db_connection):
                 except TypeError:
                     series = None
                 #process features
-                features = ', '.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
+                features = MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
                 if features == '': features = None
                 #process is_using_dosbox
                 is_using_dosbox = json_v2_parsed['isUsingDosBox']
@@ -267,7 +288,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
         logger.debug(f'PQ >>> HTTP response code: {response.status_code}.')
             
         if response.status_code == 200:
-            if scan_mode == 'full':
+            if scan_mode == 'full' or scan_mode == 'builds':
                 logger.info(f'PQ >>> Product query for id {product_id} has returned a valid response...')
             
             db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', (product_id, ))
@@ -276,11 +297,18 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             #initialize is movie with False
             is_movie = False
             
-            #no need to do any processing if an entry is found in 'full' scan mode, 
+            #no need to do any processing if an entry is found in 'full' or 'builds' scan modes, 
             #since that entry will be skipped anyway
             if not (entry_count == 1 and (scan_mode == 'full' or scan_mode == 'builds')):
                 
-                json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
+                #ignore unicode control characters which can be part of game descriptions and/or changelogs; 
+                #these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes  
+                #even with unicode conversions from and to the db... why do you do this, GOG, why???
+                filtered_response = response.text
+                for unicode_value in JSON_UNICODE_FILTERED_VALUES:
+                    filtered_response = filtered_response.replace(unicode_value, '')
+                
+                json_parsed = json.loads(filtered_response, object_pairs_hook=OrderedDict)
                 json_formatted = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
                 
                 #process unmodified fields
@@ -293,8 +321,8 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 cs_compat_linux = json_parsed['content_system_compatibility']['linux']
                 #process languages
                 if len(json_parsed['languages']) > 0:
-                    languages = ', '.join([f'{language_key}: {json_parsed["languages"][language_key]}' 
-                                           for language_key in json_parsed['languages'].keys()])
+                    languages = MVF_VALUE_SEPARATOR.join([f'{language_key}: {json_parsed["languages"][language_key]}' 
+                                                          for language_key in json_parsed['languages'].keys()])
                 else:
                     languages = None
                 #process links
@@ -378,8 +406,8 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     gog_product_company_query(product_id, session, db_connection, links_product_card.replace('/game/', '/movie/'))
             
             elif entry_count == 1:
-                #do not update existing entries in a full scan, since update/delta scans will take care of that
-                if scan_mode == 'full':
+                #do not update existing entries in a full or builds scan, since update/delta scans will take care of that
+                if scan_mode == 'full' or scan_mode == 'builds':
                     logger.info(f'PQ >>> Found an existing db entry with id {product_id}. Skipping.')
                 #manual scans will be treated as update scans
                 else:
@@ -840,8 +868,10 @@ def worker_thread(thread_number, scan_mode):
                         #terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
                             logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')
+                            
                             terminate_signal = True
-                            break
+                            #forcefully terminate script
+                            terminate_script()
                     
                         logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
                         #main iternation incremental sleep
@@ -873,7 +903,7 @@ def worker_thread(thread_number, scan_mode):
 ##main thread start
 
 #added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description=('GOG products scan (part of gog_visor) - a script to call publicly available GOG APIs '
+parser = argparse.ArgumentParser(description=('GOG products scan (part of gog_gles) - a script to call publicly available GOG APIs '
                                               'in order to retrieve product information and updates.'))
 
 group = parser.add_mutually_exclusive_group()
@@ -881,6 +911,7 @@ group.add_argument('-n', '--new', help='Query new products', action='store_true'
 group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
 group.add_argument('-f', '--full', help='Perform a full products scan using the Galaxy products endpoint', action='store_true')
 group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
+group.add_argument('-b', '--builds', help='Perform a product scan based on unknown builds', action='store_true')
 group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
 group.add_argument('-d', '--delisted', help='Perform a scan on all the delisted products', action='store_true')
 
@@ -923,6 +954,8 @@ if len(argv) > 1:
         scan_mode = 'full'
     elif args.manual:
         scan_mode = 'manual'
+    elif args.builds:
+        scan_mode = 'builds'
     elif args.extract:
         scan_mode = 'extract'
     elif args.delisted:
@@ -1146,6 +1179,44 @@ elif scan_mode == 'manual':
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
     
+    except KeyboardInterrupt:
+        pass
+
+#run product scan against items that have no title linked to them in the builds table
+elif scan_mode == 'builds':
+    logger.info('--- Running in BUILDS scan mode ---')
+    
+    try:
+        with requests.Session() as session:
+            with sqlite3.connect(db_file_full_path) as db_connection:
+                db_cursor = db_connection.execute('SELECT gb_int_id FROM gog_builds WHERE gb_int_title IS NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                
+                logger.debug('Retrieved all unidentified build product ids from the DB...')
+            
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete:
+                        if retry_counter > 0:
+                            logger.warning(f'Reprocessing id {current_product_id}...')
+                            #allow a short respite before re-processing
+                            sleep(2)
+
+                        retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+            
     except KeyboardInterrupt:
         pass
     
