@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.80
-@date: 21/03/2022
+@version: 2.90
+@date: 10/04/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -87,6 +87,7 @@ UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_v2_developer = ?, '
                       'gp_v2_publisher = ?, '
                       'gp_v2_tags = ?, '
+                      'gp_v2_properties = ?, '
                       'gp_v2_series = ?, '
                       'gp_v2_features = ?, '
                       'gp_v2_is_using_dosbox = ? WHERE gp_id = ?')
@@ -238,7 +239,15 @@ def gog_product_v2_query(product_id, session, db_connection):
                 #process tags
                 tags = MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
                 if tags == '': tags = None
-                #process series - these may be 'null' and return a TypeError in such cases
+                #process properties (tee is used for avoiding a reserved name) - the field may be absent and return a KeyError
+                try:
+                    #ideally should not need a strip, but there are a few entries with extra whitespace here and there
+                    properties = MVF_VALUE_SEPARATOR.join(sorted([propertee['name'].strip() for propertee in 
+                                                                  json_v2_parsed['_embedded']['properties']]))
+                    if properties == '': properties = None
+                except KeyError:
+                    properties = None
+                #process series - these may be 'null' and return a TypeError
                 try:
                     series = json_v2_parsed['_embedded']['series']['name'].strip()
                 except TypeError:
@@ -252,10 +261,10 @@ def gog_product_v2_query(product_id, session, db_connection):
                 with db_lock:
                     #remove title from the first position in values_formatted and add the id at the end
                     #gp_int_v2_latest_update, gp_int_v2_json_payload, gp_int_v2_previous_json_diff,
-                    #gp_v2_developer, gp_v2_publisher, gp_v2_tags, gp_vs_series,
+                    #gp_v2_developer, gp_v2_publisher, gp_v2_tags, gp_v2_properties, gp_vs_series,
                     #gp_v2_features, gp_v2_is_using_dosbox, gp_id (WHERE clause)
                     db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now(), json_v2_formatted, diff_v2_formatted, 
-                                                           developer, publisher, tags, series, 
+                                                           developer, publisher, tags, properties, series, 
                                                            features, is_using_dosbox, product_id))
                     db_connection.commit()
                     
