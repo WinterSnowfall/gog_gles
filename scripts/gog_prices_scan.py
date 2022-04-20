@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.80
-@date: 21/03/2022
+@version: 3.00
+@date: 20/04/2022
 
 Warning: Built for use with python 3.6+
 '''
 
 import json
 import sqlite3
+import signal
 import requests
 import logging
 import argparse
@@ -26,7 +27,6 @@ from logging.handlers import RotatingFileHandler
 ##global parameters init
 configParser = ConfigParser()
 terminate_signal = False
-reset_id = True
 
 ##conf file block
 conf_file_full_path = os.path.join('..', 'conf', 'gog_prices_scan.conf')
@@ -50,6 +50,14 @@ db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 INSERT_PRICES_QUERY = 'INSERT INTO gog_prices VALUES (?,?,?,?,?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
+
+def terminate_script():
+    logger.critical('Forcefully stopping script!')
+    
+    #flush buffers
+    os.sync()
+    #forcefully terminate script process
+    os.kill(os.getpid(), signal.SIGKILL)
     
 def gog_prices_query(product_id, product_title, country_code, currencies_list, session, db_connection):
     global terminate_signal
@@ -177,6 +185,7 @@ try:
     currencies_list = [currency.strip() for currency in currencies_list.split(',')]
     #parsing constants
     HTTP_TIMEOUT = general_section.getint('http_timeout')
+    RETRY_COUNT = general_section.getint('retry_count')
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise SystemExit(1)
@@ -242,7 +251,7 @@ if scan_mode == 'update':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
@@ -258,8 +267,14 @@ if scan_mode == 'update':
                                 
                         else:
                             retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                                 
-                    if last_id_counter != 0 and last_id_counter % ID_SAVE_INTERVAL == 0:
+                    if not terminate_signal and last_id_counter != 0 and last_id_counter % ID_SAVE_INTERVAL == 0:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -272,7 +287,7 @@ if scan_mode == 'update':
             db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        reset_id = False
+        terminate_signal = True
     
 elif scan_mode == 'archive':
     logger.info('--- Running in ARCHIVE scan mode ---')
@@ -303,10 +318,9 @@ elif scan_mode == 'archive':
             db_connection.execute(OPTIMIZE_QUERY)
     
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
 
-#if nothing went wrong, reset the last_id parameter to 0
-if scan_mode == 'update' and reset_id:
+if not terminate_signal and scan_mode == 'update':
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
     configParser['UPDATE_SCAN']['last_id'] = '0'
@@ -315,5 +329,5 @@ if scan_mode == 'update' and reset_id:
         configParser.write(file)
 
 logger.info('All done! Exiting...')
-        
+
 ##main thread end

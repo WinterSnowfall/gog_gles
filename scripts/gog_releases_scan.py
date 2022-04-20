@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.80
-@date: 21/03/2022
+@version: 3.00
+@date: 20/04/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -32,7 +32,6 @@ configParser = ConfigParser()
 db_lock = threading.Lock()
 config_lock = threading.Lock()
 terminate_signal = False
-reset_id = True
 
 ##conf file block
 conf_file_full_path = os.path.join('..', 'conf', 'gog_releases_scan.conf')
@@ -77,7 +76,7 @@ def sigterm_handler(signum, frame):
     raise SystemExit(0)
 
 def terminate_script():
-    logger.critical('Forcefully stopping script...')
+    logger.critical('Forcefully stopping script!')
     
     #flush buffers
     os.sync()
@@ -225,14 +224,6 @@ def worker_thread(thread_number, scan_mode):
                 
                 while not retries_complete and not terminate_signal:
                     if retry_counter > 0:
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')
-                            
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-                    
                         logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
                         #main iternation incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
@@ -240,10 +231,16 @@ def worker_thread(thread_number, scan_mode):
                     retries_complete = gog_releases_query(product_id, scan_mode, threadSession, thread_db_connection)
                     
                     if retries_complete:
-                        if retry_counter > 1:
+                        if retry_counter > 0:
                             logger.info(f'T#{thread_number} >>> Succesfully retried for {product_id}.')
                     else:
                         retry_counter += 1
+                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        if retry_counter > RETRY_COUNT:
+                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')    
+                            terminate_signal = True
+                            #forcefully terminate script
+                            terminate_script()
                     
                 if not terminate_signal and product_id != 0 and product_id % ID_SAVE_INTERVAL == 0:
                     with config_lock:
@@ -424,7 +421,7 @@ elif scan_mode == 'update':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
@@ -440,8 +437,14 @@ elif scan_mode == 'update':
                             
                         else:
                             retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                             
-                    if last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
+                    if not terminate_signal and last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -454,7 +457,7 @@ elif scan_mode == 'update':
             db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        reset_id = False
+        terminate_signal = True
             
 elif scan_mode == 'products':
     logger.info('--- Running in PRODUCTS scan mode ---')
@@ -477,36 +480,31 @@ elif scan_mode == 'products':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
                             logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                             sleep(sleep_interval)
                             
-                        try:
-                            retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
+                        retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
                             
-                            if retries_complete:
-                                if retry_counter > 0:
-                                    logger.info(f'Succesfully retried for {current_product_id}.')
-                            else:
-                                retry_counter += 1
-                        
-                        except KeyboardInterrupt:
-                            raise
-                        
-                        except:
-                            complete_windows = False
-                            complete_osx = False
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #logger.error(traceback.format_exc())
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
             
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)
         
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
 elif scan_mode == 'manual':
     logger.info('--- Running in MANUAL scan mode ---')
@@ -524,36 +522,33 @@ elif scan_mode == 'manual':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {product_id}...')
                             #allow a short respite before re-processing
                             sleep(2)
-                        try:
-                            retries_complete = gog_releases_query(product_id, scan_mode, session, db_connection)
+                        
+                        retries_complete = gog_releases_query(product_id, scan_mode, session, db_connection)
                             
-                            if retries_complete:
-                                if retry_counter > 0:
-                                    logger.info(f'Succesfully retried for {product_id}.')
-                            else:
-                                retry_counter += 1
-                                
-                        except KeyboardInterrupt:
-                            raise
-                                
-                        except:
-                            retries_complete = False
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {product_id}.')
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #logger.error(traceback.format_exc())
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
-if scan_mode == 'update' and reset_id:
+if not terminate_signal and scan_mode == 'update':
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
     configParser['UPDATE_SCAN']['last_id'] = '0'
@@ -562,5 +557,5 @@ if scan_mode == 'update' and reset_id:
         configParser.write(file)
 
 logger.info('All done! Exiting...')
-        
+
 ##main thread end

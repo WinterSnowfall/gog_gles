@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 2.80
-@date: 21/03/2022
+@version: 3.00
+@date: 20/04/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -33,7 +33,6 @@ configParser = ConfigParser()
 db_lock = threading.Lock()
 config_lock = threading.Lock()
 terminate_signal = False
-reset_id = True
 
 ##conf file block
 conf_file_full_path = os.path.join('..', 'conf', 'gog_builds_scan.conf')
@@ -80,7 +79,7 @@ def sigterm_handler(signum, frame):
     raise SystemExit(0)
 
 def terminate_script():
-    logger.critical('Forcefully stopping script...')
+    logger.critical('Forcefully stopping script!')
     
     #flush buffers
     os.sync()
@@ -239,15 +238,7 @@ def worker_thread(thread_number, scan_mode):
                 retries_complete = False
                 
                 while not retries_complete and not terminate_signal:
-                    if retry_counter > 0:
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process.')
-                            
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-                    
+                    if retry_counter > 0:                    
                         logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
                         #main iternation incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
@@ -255,10 +246,16 @@ def worker_thread(thread_number, scan_mode):
                     retries_complete = gog_builds_query(product_id, os, scan_mode, threadSession, thread_db_connection)
                         
                     if retries_complete:
-                        if retry_counter > 1:
+                        if retry_counter > 0:
                             logger.info(f'T#{thread_number} >>> Succesfully retried for {product_id}, {os}.')
                     else:
                         retry_counter += 1
+                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        if retry_counter > RETRY_COUNT:
+                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process.')    
+                            terminate_signal = True
+                            #forcefully terminate script
+                            terminate_script()
                     
                 #only do product_id processing on 'windows' build scans
                 if not terminate_signal and os == 'windows' and product_id % ID_SAVE_INTERVAL == 0:
@@ -301,7 +298,7 @@ try:
     HTTP_TIMEOUT = general_section.getint('http_timeout')
     RETRY_COUNT = general_section.getint('retry_count')
     RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
-    RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor') 
+    RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise SystemExit(1)
@@ -442,39 +439,33 @@ elif scan_mode == 'update':
                     complete_osx = False
                     retry_counter = 0
                     
-                    while not (complete_windows and complete_osx):
+                    while not (complete_windows and complete_osx) and not terminate_signal:
                         if retry_counter > 0:
                             sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
                             logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                             sleep(sleep_interval)
                                 
-                        try:
-                            complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
-                            #try other oses as well, if the 'windows' scan goes well
-                            if complete_windows:
-                                complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
-                            
-                            if complete_windows and complete_osx:
-                                if retry_counter > 0:
-                                    logger.info(f'Succesfully retried for {current_product_id}.')
-                                    
-                                last_id_counter += 1
-
-                            else:
-                                retry_counter += 1
-                                    
-                        except KeyboardInterrupt:
-                            reset_id = False
-                            raise
+                        complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
                         
-                        except:
-                            complete_windows = False
-                            complete_osx = False
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                                
+                            last_id_counter += 1
+
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #logger.error(traceback.format_exc())
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                             
-                    if last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
+                    if not terminate_signal and last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -487,7 +478,7 @@ elif scan_mode == 'update':
             db_connection.execute(OPTIMIZE_QUERY)
                     
     except KeyboardInterrupt:
-        reset_id = False
+        terminate_signal = True
     
 elif scan_mode == 'products':
     logger.info('--- Running in PRODUCTS scan mode ---')
@@ -518,39 +509,34 @@ elif scan_mode == 'products':
                     complete_osx = False
                     retry_counter = 0
                     
-                    while not (complete_windows and complete_osx):
+                    while not (complete_windows and complete_osx) and not terminate_signal:
                         if retry_counter > 0:
                             sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
                             logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                             sleep(sleep_interval)
                             
-                        try:
-                            complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
-                            #try other oses as well, if the 'windows' scan goes well
-                            if complete_windows:
-                                complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
-                            
-                            if complete_windows and complete_osx:
-                                if retry_counter > 0:
-                                    logger.info(f'Succesfully retried for {current_product_id}.')
-                            else:
-                                retry_counter += 1
+                        complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
                         
-                        except KeyboardInterrupt:
-                            raise
-                        
-                        except:
-                            complete_windows = False
-                            complete_osx = False
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #logger.error(traceback.format_exc())
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
             
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)
         
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
 elif scan_mode == 'manual':
     logger.info('--- Running in MANUAL scan mode ---')
@@ -569,38 +555,34 @@ elif scan_mode == 'manual':
                     complete_osx = False
                     retry_counter = 0
                     
-                    while not (complete_windows and complete_osx):
+                    while not (complete_windows and complete_osx) and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {product_id}...')
                             #allow a short respite before re-processing
                             sleep(2)
-                        try:
-                            complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
-                            #try other oses as well, if the 'windows' scan goes well
-                            if complete_windows:
-                                complete_osx = gog_builds_query(product_id, 'osx', scan_mode, session, db_connection)
                             
-                            if complete_windows and complete_osx:
-                                if retry_counter > 0:
-                                    logger.info(f'Succesfully retried for {product_id}.')
-                            else:
-                                retry_counter += 1
-                                
-                        except KeyboardInterrupt:
-                            raise
-                                
-                        except:
-                            complete_windows = False
-                            complete_osx = False
+                        complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(product_id, 'osx', scan_mode, session, db_connection)
+                        
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {product_id}.')
+                        else:
                             retry_counter += 1
-                            #uncomment for debugging purposes only
-                            #logger.error(traceback.format_exc())
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
 elif scan_mode == 'delta':
     logger.info('--- Running in DELTA scan mode ---')
@@ -763,9 +745,9 @@ elif scan_mode == 'delta':
             db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
-if scan_mode == 'update' and reset_id:
+if not terminate_signal and scan_mode == 'update':
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
     configParser['UPDATE_SCAN']['last_id'] = '0'

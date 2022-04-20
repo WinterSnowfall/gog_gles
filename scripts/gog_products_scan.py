@@ -36,7 +36,6 @@ configParser = ConfigParser()
 db_lock = threading.Lock()
 config_lock = threading.Lock()
 terminate_signal = False
-reset_id = True
 
 ##conf file block
 conf_file_full_path = os.path.join('..', 'conf', 'gog_products_scan.conf')
@@ -57,7 +56,7 @@ logger.addHandler(logger_file_handler)
 db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
-INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
                    'gp_int_json_payload = ?, '
@@ -118,7 +117,7 @@ def sigterm_handler(signum, frame):
     raise SystemExit(0)
 
 def terminate_script():
-    logger.critical('Forcefully stopping script...')
+    logger.critical('Forcefully stopping script!')
     
     #flush buffers
     os.sync()
@@ -232,7 +231,7 @@ def gog_product_v2_query(product_id, session, db_connection):
                     diff_v2_formatted = None
                     
                 #process product title (for loggers)
-                product_title = json_v2_parsed['_embedded']['product']['title']
+                product_title = json_v2_parsed['_embedded']['product']['title'].strip()
                 #process developer/publisher
                 developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
                 publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
@@ -389,15 +388,15 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                     #gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated, gp_int_json_payload, 
                     #gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload, 
                     #gp_int_v2_json_diff, gp_int_is_movie, gp_v2_developer, gp_v2_publisher,
-                    #gp_v2_tags, gp_v2_series, gp_v2_features, gp_v2_is_using_dosbox,
-                    #gp_id, gp_title, gp_slug, gp_cs_compat_windows, 
+                    #gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features, 
+                    #gp_v2_is_using_dosbox, gp_id, gp_title, gp_slug, gp_cs_compat_windows, 
                     #gp_cs_compat_osx, gp_cs_compat_linux, gp_languages, gp_links_forum, 
                     #gp_links_product_card, gp_links_support, gp_in_development, gp_is_installable, 
                     #gp_game_type, gp_is_pre_order, gp_release_date, gp_description_lead, 
                     #gp_description_full, gp_description_cool, gp_changelog
                     db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted,
                                                         None, None, None, None, is_movie, None, None, 
-                                                        None, None, None, None,
+                                                        None, None, None, None, None,
                                                         product_id, product_title, product_slug, cs_compat_windows, 
                                                         cs_compat_osx, cs_compat_linux, languages, links_forum, 
                                                         links_product_card, links_support, in_development, is_installable, 
@@ -446,7 +445,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                             #gp_int_updated, gp_int_json_payload, gp_int_json_diff, gp_title, 
                             #gp_slug, gp_cs_compat_windows, gp_cs_compat_osx, gp_cs_compat_linux, 
                             #gp_languages, gp_links_forum, gp_links_product_card, gp_links_support, 
-                            #gp_in_development, gp_is_installable, #gp_game_type, gp_is_pre_order, gp_release_date, 
+                            #gp_in_development, gp_is_installable, gp_game_type, gp_is_pre_order, gp_release_date, 
                             #gp_description_lead, gp_description_full, gp_description_cool, gp_changelog, gp_id (WHERE clause)
                             db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted, product_title, 
                                                                 product_slug, cs_compat_windows, cs_compat_osx, cs_compat_linux, 
@@ -551,6 +550,10 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
                     
                     if not retries_complete:
                         retry_counter += 1
+                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        if retry_counter > RETRY_COUNT:
+                            logger.critical(f'Retry count exceeded, terminating scan!')
+                            raise Exception()
              
         else:
             logger.warning(f'GQ >>> HTTP error code {response.status_code} received.')
@@ -874,14 +877,6 @@ def worker_thread(thread_number, scan_mode):
                 
                 while not retries_complete and not terminate_signal:
                     if retry_counter > 0:
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')
-                            
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-                    
                         logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
                         #main iternation incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
@@ -893,6 +888,12 @@ def worker_thread(thread_number, scan_mode):
                             logger.info(f'T#{thread_number} >>> Succesfully retried for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
                     else:
                         retry_counter += 1
+                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        if retry_counter > RETRY_COUNT:
+                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')
+                            terminate_signal = True
+                            #forcefully terminate script
+                            terminate_script()
                     
                 if not terminate_signal and product_id != 0 and product_id % ID_SAVE_INTERVAL == 0:
                     with config_lock:
@@ -1091,7 +1092,7 @@ elif scan_mode == 'update':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
@@ -1107,8 +1108,14 @@ elif scan_mode == 'update':
                             
                         else:
                             retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                             
-                    if last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
+                    if not terminate_signal and last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -1121,7 +1128,7 @@ elif scan_mode == 'update':
             db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        reset_id = False
+        terminate_signal = True
     
 elif scan_mode == 'new':
     logger.info('--- Running in NEW scan mode ---')
@@ -1153,7 +1160,7 @@ elif scan_mode == 'new':
                 db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
         
 elif scan_mode == 'manual':
     logger.info('--- Running in MANUAL scan mode ---')
@@ -1171,7 +1178,7 @@ elif scan_mode == 'manual':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {product_id}...')
                             #allow a short respite before re-processing
@@ -1184,12 +1191,18 @@ elif scan_mode == 'manual':
                                 logger.info(f'Succesfully retried for {product_id}.')       
                         else:
                             retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
     
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
 
 #run product scan against items that have no title linked to them in the builds table
 elif scan_mode == 'builds':
@@ -1209,7 +1222,7 @@ elif scan_mode == 'builds':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
@@ -1222,12 +1235,18 @@ elif scan_mode == 'builds':
                                 logger.info(f'Succesfully retried for {current_product_id}.')
                         else:
                             retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
 #extract file entries collected during the latest update runs
 elif scan_mode == 'extract':
@@ -1251,7 +1270,7 @@ elif scan_mode == 'extract':
             db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
     
 elif scan_mode == 'delisted':
     logger.info('--- Running in DELISTED scan mode ---')
@@ -1272,7 +1291,7 @@ elif scan_mode == 'delisted':
                     retries_complete = False
                     retry_counter = 0
                     
-                    while not retries_complete:
+                    while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
                             logger.warning(f'Reprocessing id {current_product_id}...')
                             #allow a short respite before re-processing
@@ -1285,14 +1304,20 @@ elif scan_mode == 'delisted':
                                 logger.info(f'Succesfully retried for {current_product_id}.')
                         else:
                             retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
     
     except KeyboardInterrupt:
-        pass
+        terminate_signal = True
 
-if scan_mode == 'update' and reset_id:
+if not terminate_signal and scan_mode == 'update':
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
     configParser['UPDATE_SCAN']['last_id'] = '0'
@@ -1301,5 +1326,5 @@ if scan_mode == 'update' and reset_id:
         configParser.write(file)
 
 logger.info('All done! Exiting...')
-        
+
 ##main thread end
