@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.00
-@date: 20/04/2022
+@version: 3.10
+@date: 18/05/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -439,7 +439,7 @@ elif scan_mode == 'update':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()
@@ -469,7 +469,7 @@ elif scan_mode == 'products':
             #select all existing ids from the gog_products table which are not already present in the 
             #gog_releases table and atempt to scan them from matching releases API entries
             db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
-                                              f'(SELECT gr_external_id FROM gog_releases ORDER BY 1) ORDER BY 1')
+                                              '(SELECT gr_external_id FROM gog_releases ORDER BY 1) ORDER BY 1')
             id_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
             
@@ -495,7 +495,7 @@ elif scan_mode == 'products':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()
@@ -537,7 +537,7 @@ elif scan_mode == 'manual':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()

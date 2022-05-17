@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.00
-@date: 20/04/2022
+@version: 3.10
+@date: 18/05/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -269,7 +269,7 @@ if scan_mode == 'update':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()
@@ -297,7 +297,7 @@ elif scan_mode == 'archive':
         
         with sqlite3.connect(db_file_full_path) as db_connection:
             db_cursor = db_connection.execute('SELECT DISTINCT gpr_int_id, gpr_int_title FROM gog_prices WHERE gpr_int_outdated IS NULL '
-                                              'AND gpr_int_id NOT IN (SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL '
+                                              'AND gpr_int_id IN (SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NOT NULL '
                                               'ORDER BY 1) ORDER BY 1')
             id_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')

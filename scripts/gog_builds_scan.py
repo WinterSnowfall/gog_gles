@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.00
-@date: 20/04/2022
+@version: 3.10
+@date: 18/05/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -460,7 +460,7 @@ elif scan_mode == 'update':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()
@@ -527,7 +527,7 @@ elif scan_mode == 'products':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()
@@ -573,7 +573,7 @@ elif scan_mode == 'manual':
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical(f'Retry count exceeded, terminating scan!')
+                                logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
                                 #forcefully terminate script
                                 terminate_script()
@@ -595,8 +595,9 @@ elif scan_mode == 'delta':
     try:
         with sqlite3.connect(db_file_full_path) as db_connection:
             #select all existing ids from the gog_builds table (with valid builds) that are also present in the gog_products table
-            db_cursor = db_connection.execute('SELECT gb_int_id, gb_int_os, gb_int_title, gb_main_version_names FROM gog_builds WHERE gb_int_id IN '
-                                              '(SELECT gp_id FROM gog_products ORDER BY 1) AND gb_main_version_names IS NOT NULL ORDER BY 1')
+            db_cursor = db_connection.execute('SELECT gb_int_id, gb_int_os, gb_int_title, gb_main_version_names FROM gog_builds '
+                                              'WHERE gb_int_id IN (SELECT gp_id FROM gog_products ORDER BY 1) AND '
+                                              'gb_main_version_names IS NOT NULL ORDER BY 1')
             delta_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
                  
@@ -612,16 +613,19 @@ elif scan_mode == 'delta':
                 current_main_version_names = delta_entry[3].split(MVF_VALUE_SEPARATOR)
                 logger.debug(f'Current builds main version names are: {current_main_version_names}.')
 
-                #restricing languages to "en" only will solve a lot of version discrepancy problems, as some installers get misversioned non-english languages
-                #added at later points in time, however the following titles will no longer be tracked because of this (mentioning them here for future reference):
+                #restricing languages to "en" only will solve a lot of version discrepancy problems, 
+                #as some installers get misversioned non-english languages added at later points in time, 
+                #however the following titles will no longer be tracked because of this 
+                #(mentioning them here for future reference):
                 #
                 #Kajko i Kokosz    1720224179    pl
                 #Wolfenstein II: The New Colossus German Edition    1285433790    de
                 #Anstoss 2 Gold Edition    1808817480    de
                 #ANSTOSS 3: Der Fußballmanager    1886141726    de
                 #
-                db_cursor = db_connection.execute('SELECT DISTINCT gf_version FROM gog_files WHERE gf_int_id = ? AND gf_int_removed IS NULL AND gf_language = "en" '
-                                                  'AND gf_int_download_type = "installer" AND gf_os = ? AND gf_version IS NOT NULL ORDER BY gf_int_added DESC LIMIT 1', 
+                db_cursor = db_connection.execute('SELECT DISTINCT gf_version FROM gog_files WHERE gf_int_id = ? AND '
+                                                  'gf_int_removed IS NULL AND gf_language = "en" AND gf_int_download_type = "installer" AND '
+                                                  'gf_os = ? AND gf_version IS NOT NULL ORDER BY gf_int_added DESC LIMIT 1', 
                                                   (current_product_id, current_os_files))
                 latest_version = db_cursor.fetchone()
                 
