@@ -4,6 +4,8 @@ cd scripts
 
 python3 gog_products_scan.py -n
 python3 gog_products_scan.py -u
+#uncomment if you also want to recheck delisted ids
+#python3 gog_products_scan.py -d
 python3 gog_products_scan.py -e
 
 python3 gog_builds_scan.py -u
