@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.10
-@date: 18/05/2022
+@version: 3.11
+@date: 29/05/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -1169,13 +1169,13 @@ elif scan_mode == 'manual':
     
     manual_scan_section = configParser['MANUAL_SCAN']
     #load the product id list to process
-    product_id_list = [int(product_id.strip()) for product_id in 
-                       manual_scan_section.get('id_list').split(',')]
+    id_list = [int(product_id.strip()) for product_id in 
+               manual_scan_section.get('id_list').split(',')]
     
     try:
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                for product_id in product_id_list:
+                for product_id in id_list:
                     logger.info(f'Running scan for id {product_id}...')
                     retries_complete = False
                     retry_counter = 0
@@ -1282,7 +1282,7 @@ elif scan_mode == 'delisted':
         
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                #select all products which are no longer listed, excluding potential duplicates
+                #select all products which are no longer listed
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NOT NULL ORDER BY 1')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all delisted product ids from the DB...')

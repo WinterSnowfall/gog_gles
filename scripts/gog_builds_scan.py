@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.10
-@date: 18/05/2022
+@version: 3.11
+@date: 29/05/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -53,7 +53,7 @@ logger.addHandler(logger_file_handler)
 db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
-INSERT_BUILD_QUERY = 'INSERT INTO gog_builds VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+INSERT_BUILD_QUERY = 'INSERT INTO gog_builds VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 UPDATE_BUILD_QUERY = ('UPDATE gog_builds SET gb_int_updated = ?, '
                         'gb_int_json_payload = ?, '
@@ -151,12 +151,12 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
                     product_name = result[0] if result is not None else None
                         
                 if entry_count == 0:
-                    #gb_int_nr, gb_int_added, gb_int_updated, gb_int_json_payload,
-                    #gb_int_json_diff, gb_id, gb_product_title, gb_os,
+                    #gb_int_nr, gb_int_added, gb_int_removed, gb_int_updated, gb_int_json_payload,
+                    #gb_int_json_diff, gb_int_id, gb_int_title, gb_int_os,
                     #gb_total_count, gb_count, gb_main_version_names, 
                     #gb_branch_version_names, gb_has_private_branches
                     with db_lock:
-                        db_cursor.execute(INSERT_BUILD_QUERY, (None, datetime.now(), None, json_formatted, 
+                        db_cursor.execute(INSERT_BUILD_QUERY, (None, datetime.now(), None, None, json_formatted, 
                                                                None, product_id, product_name, os, 
                                                                total_count, count, main_version_names, 
                                                                branch_version_names, has_private_branches))
@@ -164,14 +164,22 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
                     logger.info(f'BQ +++ Added a new DB entry for {product_id}: {product_name}, {os}.')
                     
                 elif entry_count == 1:
-                    #do not update existing entries in a full, products or manual scan, since update/delta scans will take care of that
-                    if scan_mode == 'full' or scan_mode == 'products' or scan_mode == 'manual':
+                    #do not update existing entries in a full or products scan since update/delta scans will take care of that
+                    if scan_mode == 'full' or scan_mode == 'products':
                         logger.info(f'BQ >>> Found an existing db entry with id {product_id}, {os}. Skipping.')
-                    
+                    #manual scans will be treated as update scans
                     else:
-                        db_cursor.execute('SELECT gb_int_json_payload, gb_int_title FROM gog_builds '
+                        db_cursor.execute('SELECT gb_int_removed, gb_int_json_payload, gb_int_title FROM gog_builds '
                                           'WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os))
-                        existing_json_formatted, existing_product_name = db_cursor.fetchone()
+                        existing_removed, existing_json_formatted, existing_product_name = db_cursor.fetchone()
+                        
+                        if existing_removed is not None:
+                            logger.debug(f'BQ >>> Found a previously removed entry for {product_id}, {os}. Clearing removed status...')
+                            with db_lock:
+                                db_cursor.execute('UPDATE gog_builds SET gb_int_removed = NULL WHERE gb_int_id = ? AND gb_int_os = ?', 
+                                                  (product_id, os))
+                                db_connection.commit()
+                            logger.info(f'BQ *** Cleared removed status for {product_id}, {os}: {product_name}')
                         
                         if product_name is not None and existing_product_name != product_name:
                             logger.info(f'BQ >>> Found a valid (or new) product name: {product_name}. Updating...')
@@ -189,7 +197,7 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
                             diff_formatted = ''.join([line for line in difflib.unified_diff(json_formatted.splitlines(1), 
                                                                                            existing_json_formatted.splitlines(1), n=0)])
                             
-                            #gb_int_latest_update, gb_int_json_payload, gb_int_previous_json_diff,
+                            #gb_int_updated, gb_int_json_payload, gb_int_json_diff,
                             #gb_total_count, gb_count, gb_main_version_names, gb_branch_version_names, 
                             #gb_has_private_branches, gb_id (WHERE clause), gb_os (WHERE clause)
                             with db_lock:
@@ -198,6 +206,31 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
                                                                        has_private_branches, product_id, os))
                                 db_connection.commit()
                             logger.info(f'BQ ~~~ Updated the DB entry for {product_id}: {product_name}, {os}.')
+            
+            elif scan_mode == 'update' and total_count == 0:
+                
+                db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os))
+                entry_count = db_cursor.fetchone()[0]
+                
+                if entry_count == 1:
+                    #check to see the existing value for gb_int_removed
+                    db_cursor = db_connection.execute('SELECT gb_int_removed, gb_int_title FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', 
+                                                      (product_id, os))
+                    existing_delisted, product_name = db_cursor.fetchone()
+                    
+                    #only alter the entry if not already marked as removed
+                    if existing_delisted is None:
+                        logger.debug(f'BQ >>> All builds for {product_id}, {os} have been removed...')
+                        with db_lock:
+                            #also reset/clear all other attributes in order to reflect the removal;
+                            #previous values will still be stored as part of the attached json payload
+                            db_cursor.execute('UPDATE gog_builds SET gb_int_removed = ?, gb_total_count = 0, gb_count = 0, '
+                                              'gb_main_version_names = NULL, gb_branch_version_names = NULL, gb_has_private_branches = 0 '
+                                              'WHERE gb_int_id = ? AND gb_int_os = ?', (datetime.now(), product_id, os))
+                            db_connection.commit()
+                        logger.warning(f'BQ --- Marked the builds for {product_id}, {os}: {product_name} as removed.')
+                    else:
+                        logger.debug(f'BQ >>> Builds for {product_id}, {os} are already marked as removed.')
         
         else:
             logger.warning(f'BQ >>> HTTP error code {response.status_code} received for {product_id}, {os}.')
@@ -283,6 +316,7 @@ group.add_argument('-f', '--full', help='Perform a full builds scan', action='st
 group.add_argument('-p', '--products', help='Perform a products-based builds scan', action='store_true')
 group.add_argument('-m', '--manual', help='Perform a manual builds scan', action='store_true')
 group.add_argument('-d', '--delta', help='Produce a list of ids whose latest builds are exclusive to Galaxy', action='store_true')
+group.add_argument('-r', '--removed', help='Perform a scan on all the removed builds', action='store_true')
 
 args = parser.parse_args()
     
@@ -317,6 +351,8 @@ if len(argv) > 1:
         scan_mode = 'manual'
     elif args.delta:
         scan_mode = 'delta'
+    elif args.removed:
+        scan_mode = 'removed'
 
 #boolean 'true' or scan_mode specific activation
 if conf_backup == 'true' or conf_backup == scan_mode:
@@ -424,7 +460,8 @@ elif scan_mode == 'update':
         
         with sqlite3.connect(db_file_full_path) as db_connection:
             #select all existing ids from the gog_builds table
-            db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_id > ? ORDER BY 1', (last_id, ))
+            db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_removed IS NULL AND '
+                                              'gb_int_id > ? ORDER BY 1', (last_id, ))
             id_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
             
@@ -543,13 +580,13 @@ elif scan_mode == 'manual':
     
     manual_scan_section = configParser['MANUAL_SCAN']
     #load the product id list to process
-    product_id_list = manual_scan_section.get('id_list')
-    product_id_list = [int(product_id.strip()) for product_id in product_id_list.split(',')]
+    id_list = manual_scan_section.get('id_list')
+    id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
     
     try:
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                for product_id in product_id_list:
+                for product_id in id_list:
                     logger.info(f'Running scan for id {product_id}...')
                     complete_windows = False
                     complete_osx = False
@@ -596,8 +633,8 @@ elif scan_mode == 'delta':
         with sqlite3.connect(db_file_full_path) as db_connection:
             #select all existing ids from the gog_builds table (with valid builds) that are also present in the gog_products table
             db_cursor = db_connection.execute('SELECT gb_int_id, gb_int_os, gb_int_title, gb_main_version_names FROM gog_builds '
-                                              'WHERE gb_int_id IN (SELECT gp_id FROM gog_products ORDER BY 1) AND '
-                                              'gb_main_version_names IS NOT NULL ORDER BY 1')
+                                              'WHERE gb_main_version_names IS NOT NULL AND '
+                                              'gb_int_id IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
             delta_list = db_cursor.fetchall()
             logger.debug('Retrieved all applicable product ids from the DB...')
                  
@@ -747,6 +784,54 @@ elif scan_mode == 'delta':
                 
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)
+            
+    except KeyboardInterrupt:
+        terminate_signal = True
+        
+elif scan_mode == 'removed':
+    logger.info('--- Running in REMOVED scan mode ---')
+    
+    try:
+        logger.info('Starting scan on all removed DB entries...')
+        
+        with requests.Session() as session:
+            with sqlite3.connect(db_file_full_path) as db_connection:
+                #select all builds which are removed
+                db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_removed IS NOT NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all removed build ids from the DB...')
+                
+                for product_id in id_list:
+                    logger.info(f'Running scan for id {product_id}...')
+                    complete_windows = False
+                    complete_osx = False
+                    retry_counter = 0
+                    
+                    while not (complete_windows and complete_osx) and not terminate_signal:
+                        if retry_counter > 0:
+                            logger.warning(f'Reprocessing id {product_id}...')
+                            #allow a short respite before re-processing
+                            sleep(2)
+                            
+                        complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(product_id, 'osx', scan_mode, session, db_connection)
+                        
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
+            
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
             
     except KeyboardInterrupt:
         terminate_signal = True

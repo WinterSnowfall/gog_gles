@@ -9,6 +9,8 @@ python3 gog_products_scan.py -u
 python3 gog_products_scan.py -e
 
 python3 gog_builds_scan.py -u
+#uncomment if you also want to recheck removed builds
+#python3 gog_builds_scan.py -r
 #uncomment if you want to track differences between
 #offline installers and Galaxy builds (delta scan)
 #python3 gog_builds_scan.py -d

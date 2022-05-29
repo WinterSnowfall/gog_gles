@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.10
-@date: 18/05/2022
+@version: 3.11
+@date: 29/05/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -30,6 +30,7 @@ db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 ##CONSTANTS
 CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                            'gb_int_added TEXT NOT NULL, '
+                           'gb_int_removed TEXT, '
                            'gb_int_updated TEXT, '
                            'gb_int_json_payload TEXT NOT NULL, '
                            'gb_int_json_diff TEXT, '
