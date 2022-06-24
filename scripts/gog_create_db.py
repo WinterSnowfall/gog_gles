@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.11
-@date: 29/05/2022
+@version: 3.12
+@date: 18/06/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -58,6 +58,12 @@ CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY
                           'gf_total_size INTEGER NOT NULL, '
                           'gf_file_id TEXT NOT NULL, '
                           'gf_file_size INTEGER NOT NULL)')
+
+CREATE_GOG_FORUMS_QUERY = ('CREATE TABLE gog_forums (gfr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+                          'gfr_int_added TEXT NOT NULL, '
+                          'gfr_int_removed TEXT, '
+                          'gfr_name TEXT NOT NULL, '
+                          'gfr_link TEXT NOT NULL)')
 
 CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                                      'gid_int_added TEXT NOT NULL, '
@@ -150,6 +156,8 @@ if not os.path.exists(db_file_full_path):
         db_cursor.execute('CREATE UNIQUE INDEX gb_int_id_os_index ON gog_builds (gb_int_id, gb_int_os)')
         db_cursor.execute(CREATE_GOG_FILES_QUERY)
         db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
+        db_cursor.execute(CREATE_GOG_FORUMS_QUERY)
+        db_cursor.execute('CREATE UNIQUE INDEX gfr_name_index ON gog_forums (gfr_name)')
         db_cursor.execute(CREATE_GOG_INSTALLERS_DELTA_QUERY)
         db_cursor.execute('CREATE INDEX gid_int_id_os_index ON gog_installers_delta (gid_int_id, gid_int_os)')
         db_cursor.execute(CREATE_GOG_PRICES_QUERY)

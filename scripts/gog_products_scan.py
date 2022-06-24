@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.11
-@date: 29/05/2022
+@version: 3.12
+@date: 18/06/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -189,6 +189,11 @@ def gog_product_company_query(product_id, session, db_connection, product_url):
             logger.warning(f'CQ >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
         
+    #sometimes the connection may time out
+    except requests.Timeout:
+        logger.warning(f'CQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
+        raise
+        
     except:
         logger.debug(f'CQ >>> Product company query has failed for {product_id}.')
         #uncomment for debugging purposes only
@@ -281,6 +286,11 @@ def gog_product_v2_query(product_id, session, db_connection):
         else:
             logger.warning(f'2Q >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
+        
+    #sometimes the connection may time out
+    except requests.Timeout:
+        logger.warning(f'2Q >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
+        raise
         
     except:
         logger.debug(f'2Q >>> Product company query has failed for {product_id}.')
@@ -430,7 +440,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                         with db_lock:
                             db_cursor.execute('UPDATE gog_products SET gp_int_delisted = NULL WHERE gp_id = ?', (product_id, ))
                             db_connection.commit()
-                        logger.info(f'PQ *** Removed delisted status for {product_id}: {product_title}')
+                        logger.info(f'PQ *** Removed delisted status for {product_id}: {product_title}.')
                     
                     if existing_json_formatted != json_formatted:
                         logger.debug(f'PQ >>> Existing entry for {product_id} is outdated. Updating...')
@@ -490,6 +500,11 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
             raise Exception()
         
         return True
+    
+    #sometimes the connection may time out
+    except requests.Timeout:
+        logger.warning(f'PQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
+        return False
 
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
@@ -562,6 +577,11 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
             raise Exception()
         
         return totalPages
+    
+    #sometimes the connection may time out
+    except requests.Timeout:
+        logger.warning(f'GQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
+        return 0
     
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
