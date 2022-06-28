@@ -141,7 +141,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
     
     #sometimes the connection may time out
     except requests.Timeout:
-        logger.critical(f'PQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds.')
+        logger.warning(f'PQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds.')
         return False
         
     #sometimes the HTTPS connection encounters SSL errors

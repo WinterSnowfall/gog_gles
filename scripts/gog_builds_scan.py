@@ -111,9 +111,9 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
                 db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os))
                 entry_count = db_cursor.fetchone()[0]
                 
-                #no need to do any processing if an entry is found in 'full', 'products' or 'manual' scan modes,
+                #no need to do any processing if an entry is found in 'full' or 'products' scan modes,
                 #since that entry will be skipped anyway
-                if not (entry_count == 1 and (scan_mode == 'full' or scan_mode == 'products' or scan_mode == 'manual')):
+                if not (entry_count == 1 and (scan_mode == 'full' or scan_mode == 'products')):
                     
                     json_formatted = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
                     
@@ -241,20 +241,17 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'BQ >>> Connection SSL error encountered for {product_id}, {os}.')
-        
         return False
     
     #sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'BQ >>> Connection error encountered for {product_id}, {os}.')
-        
         return False
     
     except:
         logger.debug(f'BQ >>> Builds query has failed for {product_id}, {os}.')
         #uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
-        
         return False
     
 def worker_thread(thread_number, scan_mode):
