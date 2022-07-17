@@ -43,11 +43,6 @@ db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 INSERT_FORUM_QUERY = 'INSERT INTO gog_forums VALUES (?,?,?,?,?)'
-
-#set the gog_lc cookie to avoid errors bought about by GOG dynamically determining the site language
-COOKIES = {
-    'gog_lc': 'BE_EUR_en-US'
-}
         
 def gog_forums_query(session, db_connection):
     
@@ -56,7 +51,7 @@ def gog_forums_query(session, db_connection):
     detected_forum_names = []
     
     try:
-        response = session.get(forums_url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
+        response = session.get(forums_url, timeout=HTTP_TIMEOUT)
         
         logger.debug(f'FRQ >>> HTTP response code: {response.status_code}.')
         

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.12
-@date: 18/06/2022
+@version: 3.20
+@date: 16/07/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -106,11 +106,6 @@ MVF_VALUE_SEPARATOR = '; '
 #of unicode string black magic that I can't quite understand...
 JSON_UNICODE_FILTERED_VALUES = ('', '\\u0092', '\\u0093', '\\u0094', '\\u0097')
 
-#set the gog_lc cookie to avoid errors bought about by GOG dynamically determining the site language
-COOKIES = {
-    'gog_lc': 'BE_EUR_en-US'
-}
-
 def sigterm_handler(signum, frame):
     logger.info('Stopping scan due to SIGTERM...')
     
@@ -124,19 +119,21 @@ def terminate_script():
     #forcefully terminate script process
     os.kill(os.getpid(), signal.SIGKILL)
 
+#fallback path for movies, which scrapes the product page (regular ids will scrape developer/publisher info from the v2 call)
 def gog_product_company_query(product_id, session, db_connection, product_url):
     
     logger.debug(f'CQ >>> Querying url: {product_url}.')
         
     try:
-        response = session.get(product_url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
+        #set the gog_lc cookie to avoid errors bought about by GOG dynamically determining language
+        response = session.get(product_url, cookies={'gog_lc': 'BE_EUR_en-US'}, timeout=HTTP_TIMEOUT)
         
         logger.debug(f'CQ >>> HTTP response code: {response.status_code}.')
         
         if response.status_code == 200:
             logger.debug(f'CQ >>> HTTP response URL: {response.url}.')
             
-            #check if the response URL remained identical to with the provided product URL
+            #check if the response URL remained identical to the provided product URL
             if response.url == product_url:
                 logger.debug(f'CQ >>> Product company query for id {product_id} has returned a valid response...')
                     
@@ -522,24 +519,26 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
         #logger.error(traceback.format_exc())
         return False
     
-def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
+def gog_product_games_catalog_query(parameters, scan_mode, session, db_connection):
     
-    logger.info(f'GQ >>> Querying url: {url}.')
+    catalog_url = f'https://catalog.gog.com/v1/catalog?{parameters}'
+    
+    logger.debug(f'GQ >>> Querying url: {catalog_url}.')
     
     #return a value of 0, should something go terribly wrong
-    totalPages = 0
+    pages = 0
     
     try:
-        response = session.get(url, cookies=COOKIES, timeout=HTTP_TIMEOUT)
+        response = session.get(catalog_url, timeout=HTTP_TIMEOUT)
         
         logger.debug(f'GQ >>> HTTP response code: {response.status_code}.')
         
         if response.status_code == 200:
             gogData_json = json.loads(response.text, object_pairs_hook=OrderedDict)
             
-            #return the total number of pages, as listed in the response
-            totalPages = gogData_json['totalPages']
-            logger.debug(f'GQ >>> Total pages: {totalPages}.')
+            #return the number of pages, as listed in the response
+            pages = gogData_json['pages']
+            logger.debug(f'GQ >>> Response pages: {pages}.')
                         
             #use a set to avoid processing potentially duplicate ids
             id_set = set()
@@ -576,7 +575,7 @@ def gog_product_games_ajax_query(url, scan_mode, session, db_connection):
             logger.warning(f'GQ >>> HTTP error code {response.status_code} received.')
             raise Exception()
         
-        return totalPages
+        return pages
     
     #sometimes the connection may time out
     except requests.Timeout:
@@ -1158,24 +1157,28 @@ elif scan_mode == 'new':
     try:
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
+                logger.info('Running scan for new arrival entries...')
                 page_no = 1
-                #start off as 1, then use whatever is returned by the ajax call
-                games_new_url_page_count = 1
-                #new games may number above 50 entries and can be split across 2+ pages in the ajax call
-                while games_new_url_page_count != 0 and page_no <= games_new_url_page_count:
-                    games_new_url = f'https://www.gog.com/games/ajax/filtered?availability=new&mediaType=game&page={page_no}&sort=date'
-                    #parse new ids from the games page ajax call
-                    games_new_url_page_count = gog_product_games_ajax_query(games_new_url, scan_mode, session, db_connection)
+                #start off with 1, then use whatever is returned by the API call
+                new_page_count = 1
+                #use default website pagination, which means the response can be split across 2+ pages in the API call
+                while new_page_count != 0 and page_no <= new_page_count:
+                    new_params = ''.join(('limit=48&releaseStatuses=in:new-arrival&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
+                                          #locales and currency don't matter here, but emulate default GOG website behavior
+                                          str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
+                    new_page_count = gog_product_games_catalog_query(new_params, scan_mode, session, db_connection)
                     page_no += 1
                 
+                logger.info('Running scan for upcoming entries...')
                 page_no = 1
-                #start off as 1, then use whatever is returned by the ajax call
-                games_upcoming_url_page_count = 1
-                #upcoming games may number above 50 entries and can be split across 2+ pages in the ajax call
-                while games_upcoming_url_page_count != 0 and page_no <= games_upcoming_url_page_count:
-                    games_upcoming_url = f'https://www.gog.com/games/ajax/filtered?availability=coming&mediaType=game&page={page_no}&sort=date'
-                    #parse new ids from the games page ajax call
-                    games_upcoming_url_page_count = gog_product_games_ajax_query(games_upcoming_url, scan_mode, session, db_connection)
+                #start off with 1, then use whatever is returned by the API call
+                upcoming_page_count = 1
+                #use default website pagination, which means the response can be split across 2+ pages in the API call
+                while upcoming_page_count != 0 and page_no <= upcoming_page_count:
+                    upcoming_params = ''.join(('limit=48&releaseStatuses=in:upcoming&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
+                                               #locales and currency don't matter here, but emulate default GOG website behavior
+                                               str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
+                    upcoming_page_count = gog_product_games_catalog_query(upcoming_params, scan_mode, session, db_connection)
                     page_no += 1
                     
                 logger.debug('Running PRAGMA optimize...')
