@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.20
-@date: 16/07/2022
+@version: 3.21
+@date: 23/07/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -591,9 +591,9 @@ elif scan_mode == 'manual':
                     
                     while not (complete_windows and complete_osx) and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
                             
                         complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
                         #try other oses as well, if the 'windows' scan goes well
@@ -798,26 +798,27 @@ elif scan_mode == 'removed':
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all removed build ids from the DB...')
                 
-                for product_id in id_list:
-                    logger.info(f'Running scan for id {product_id}...')
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.info(f'Running scan for id {current_product_id}...')
                     complete_windows = False
                     complete_osx = False
                     retry_counter = 0
                     
                     while not (complete_windows and complete_osx) and not terminate_signal:
                         if retry_counter > 0:
-                            logger.warning(f'Reprocessing id {product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
                             
-                        complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
+                        complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
                         #try other oses as well, if the 'windows' scan goes well
                         if complete_windows:
-                            complete_osx = gog_builds_query(product_id, 'osx', scan_mode, session, db_connection)
+                            complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
                         
                         if complete_windows and complete_osx:
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {product_id}.')
+                                logger.info(f'Succesfully retried for {current_product_id}.')
                         else:
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded

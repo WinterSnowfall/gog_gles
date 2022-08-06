@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.20
-@date: 16/07/2022
+@version: 3.21
+@date: 23/07/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -188,6 +188,7 @@ try:
     #parsing constants
     HTTP_TIMEOUT = general_section.getint('http_timeout')
     RETRY_COUNT = general_section.getint('retry_count')
+    RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise SystemExit(1)
@@ -255,9 +256,9 @@ if scan_mode == 'update':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
                             
                         retries_complete = gog_prices_query(current_product_id, current_product_title, country_code, currencies_list, session, db_connection)
                             

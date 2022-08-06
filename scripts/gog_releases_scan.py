@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.20
-@date: 16/07/2022
+@version: 3.21
+@date: 23/07/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -423,9 +423,9 @@ elif scan_mode == 'update':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
                             
                         retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
                         
@@ -524,9 +524,9 @@ elif scan_mode == 'manual':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
-                            logger.warning(f'Reprocessing id {product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
                         
                         retries_complete = gog_releases_query(product_id, scan_mode, session, db_connection)
                             

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.12
-@date: 18/06/2022
+@version: 3.22
+@date: 28/07/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -15,6 +15,7 @@ import os
 from shutil import copy2
 from configparser import ConfigParser
 from datetime import datetime
+from time import sleep
 from lxml import html as lhtml
 from logging.handlers import RotatingFileHandler
 #uncomment for debugging purposes only
@@ -22,6 +23,7 @@ from logging.handlers import RotatingFileHandler
 
 ##global parameters init
 configParser = ConfigParser()
+terminate_signal = False
 
 ##conf file block
 conf_file_full_path = os.path.join('..', 'conf', 'gog_forums_scan.conf')
@@ -106,7 +108,7 @@ def gog_forums_query(session, db_connection):
             else:
                 db_cursor.execute('SELECT gfr_name FROM gog_forums WHERE gfr_int_removed IS NULL ' 
                                  f'AND gfr_name NOT IN ({exclusion_list})')
-                forum_name_list = db_cursor.fetchall()
+                forum_name_list = [forum_name[0] for forum_name in db_cursor.fetchall()]
                 
                 for forum_name in forum_name_list:
                     logger.debug(f'FRQ >>> Forum {forum_name} has been removed...')
@@ -114,25 +116,32 @@ def gog_forums_query(session, db_connection):
                     db_connection.commit()
                     logger.warning(f'FRQ --- Marked the DB entry for {forum_name} as removed.')
                     
+            return True
+                    
         else:
-            logger.critical(f'FRQ >>> HTTP error code {response.status_code} received.')
+            logger.warning(f'FRQ >>> HTTP error code {response.status_code} received.')
+            return False
         
     #sometimes the connection may time out
     except requests.Timeout:
-        logger.critical(f'FRQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds.')
+        logger.warning(f'FRQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds.')
+        return False
         
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
-        logger.critical('FRQ >>> Connection SSL error encountered.')
+        logger.warning('FRQ >>> Connection SSL error encountered.')
+        return False
     
     #sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
-        logger.critical('FRQ >>> Connection error encountered.')
+        logger.warning('FRQ >>> Connection error encountered.')
+        return False
     
     except:
-        logger.error('FRQ >>> Forums query has failed.')
+        logger.debug('FRQ >>> Forums query has failed.')
         #uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
+        return False
     
 ##main thread start
 
@@ -152,6 +161,8 @@ try:
     db_backup = general_section.get('db_backup')
     #parsing constants
     HTTP_TIMEOUT = general_section.getint('http_timeout')
+    RETRY_COUNT = general_section.getint('retry_count')
+    RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
 except:
     logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
     raise SystemExit(1)
@@ -172,10 +183,32 @@ try:
         
     with sqlite3.connect(db_file_full_path) as db_connection:
         with requests.Session() as session:
-            gog_forums_query(session, db_connection)
+            retries_complete = False
+            retry_counter = 0
+                    
+            while not retries_complete and not terminate_signal:
+                if retry_counter > 0:
+                    logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                    sleep(RETRY_SLEEP_INTERVAL)
+                    logger.warning(f'Reprocessing forum entries...')
+                    
+                retries_complete = gog_forums_query(session, db_connection)
+                
+                if retries_complete:
+                    if retry_counter > 0:
+                        logger.info(f'Succesfully retried forum entries.')
+                
+                else:
+                    retry_counter += 1
+                    #terminate the scan if the RETRY_COUNT limit is exceeded
+                    if retry_counter > RETRY_COUNT:
+                        logger.critical('Retry count exceeded, terminating scan!')
+                        terminate_signal = True
+                        #forcefully terminate script
+                        terminate_script()
                     
 except KeyboardInterrupt:
-    pass
+    terminate_signal = True
 
 logger.info('All done! Exiting...')
 

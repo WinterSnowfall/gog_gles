@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.20
-@date: 16/07/2022
+@version: 3.21
+@date: 23/07/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -558,9 +558,9 @@ def gog_product_games_catalog_query(parameters, scan_mode, session, db_connectio
                 
                 while not retries_complete:
                     if retry_counter > 0:
+                        logger.warning(f'GQ >>> Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                        sleep(RETRY_SLEEP_INTERVAL)
                         logger.warning(f'GQ >>> Reprocessing id {product_id}...')
-                        #allow a short respite before re-processing
-                        sleep(2)
                     
                     retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
                     
@@ -575,28 +575,28 @@ def gog_product_games_catalog_query(parameters, scan_mode, session, db_connectio
             logger.warning(f'GQ >>> HTTP error code {response.status_code} received.')
             raise Exception()
         
-        return pages
+        return (True, pages)
     
     #sometimes the connection may time out
     except requests.Timeout:
         logger.warning(f'GQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
-        return 0
+        return (False, 0)
     
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'GQ >>> Connection SSL error encountered for {product_id}.')
-        return 0
+        return (False, 0)
     
     #sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'GQ >>> Connection error encountered for {product_id}.')
-        return 0
+        return (False, 0)
     
     except:
-        logger.critical('GQ >>> Processing has failed!')
+        logger.debug('GQ >>> Processing has failed!')
         #uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
-        return 0
+        return (False, 0)
         
 def gog_files_extract_parser(db_connection, product_id):
     
@@ -843,9 +843,9 @@ def gog_products_bulk_query(product_id, scan_mode, session, db_connection):
                     
                 while not retries_complete:
                     if retry_counter > 0:
+                        logger.warning(f'BQ >>> Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                        sleep(RETRY_SLEEP_INTERVAL)
                         logger.warning(f'BQ >>> Reprocessing id {current_product_id}...')
-                        #allow a short respite before re-processing
-                        sleep(2)
                     
                     retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
                     
@@ -1115,9 +1115,9 @@ elif scan_mode == 'update':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
                             
                         retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
                         
@@ -1157,29 +1157,75 @@ elif scan_mode == 'new':
     try:
         with requests.Session() as session:
             with sqlite3.connect(db_file_full_path) as db_connection:
-                logger.info('Running scan for new arrival entries...')
+                logger.info('Running scan for new arrival entries...')    
                 page_no = 1
                 #start off with 1, then use whatever is returned by the API call
                 new_page_count = 1
                 #use default website pagination, which means the response can be split across 2+ pages in the API call
-                while new_page_count != 0 and page_no <= new_page_count:
-                    new_params = ''.join(('limit=48&releaseStatuses=in:new-arrival&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
-                                          #locales and currency don't matter here, but emulate default GOG website behavior
-                                          str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
-                    new_page_count = gog_product_games_catalog_query(new_params, scan_mode, session, db_connection)
-                    page_no += 1
+                while page_no <= new_page_count and not terminate_signal:
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_signal:
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing new arrivals page {page_no}...')
+                            
+                        new_params = ''.join(('limit=48&releaseStatuses=in:new-arrival&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
+                                              #locales and currency don't matter here, but emulate default GOG website behavior
+                                              str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
+                        retries_complete, new_page_count = gog_product_games_catalog_query(new_params, scan_mode, session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for page {page_no}.')
+                            
+                            page_no += 1
+                        
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                 
                 logger.info('Running scan for upcoming entries...')
                 page_no = 1
                 #start off with 1, then use whatever is returned by the API call
                 upcoming_page_count = 1
                 #use default website pagination, which means the response can be split across 2+ pages in the API call
-                while upcoming_page_count != 0 and page_no <= upcoming_page_count:
-                    upcoming_params = ''.join(('limit=48&releaseStatuses=in:upcoming&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
-                                               #locales and currency don't matter here, but emulate default GOG website behavior
-                                               str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
-                    upcoming_page_count = gog_product_games_catalog_query(upcoming_params, scan_mode, session, db_connection)
-                    page_no += 1
+                while page_no <= upcoming_page_count and not terminate_signal:
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_signal:
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing upcoming entries page {page_no}...')
+                    
+                        upcoming_params = ''.join(('limit=48&releaseStatuses=in:upcoming&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
+                                                   #locales and currency don't matter here, but emulate default GOG website behavior
+                                                   str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
+                        retries_complete, upcoming_page_count = gog_product_games_catalog_query(upcoming_params, scan_mode, session, db_connection) 
+                    
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for page {page_no}.')
+                            
+                            page_no += 1
+                        
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
                     
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1205,9 +1251,9 @@ elif scan_mode == 'manual':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
                             
                         retries_complete = gog_product_extended_query(product_id, scan_mode, session, db_connection)
                         
@@ -1249,9 +1295,9 @@ elif scan_mode == 'builds':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
 
                         retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
                         
@@ -1318,9 +1364,9 @@ elif scan_mode == 'delisted':
                     
                     while not retries_complete and not terminate_signal:
                         if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            #allow a short respite before re-processing
-                            sleep(2)
 
                         retries_complete = gog_product_extended_query(current_product_id, scan_mode, session, db_connection)
                         
