@@ -62,7 +62,7 @@ CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY
 CREATE_GOG_FORUMS_QUERY = ('CREATE TABLE gog_forums (gfr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                           'gfr_int_added TEXT NOT NULL, '
                           'gfr_int_removed TEXT, '
-                          'gfr_name TEXT NOT NULL, '
+                          'gfr_name TEXT UNIQUE NOT NULL, '
                           'gfr_link TEXT NOT NULL)')
 
 CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -157,7 +157,6 @@ if not os.path.exists(db_file_full_path):
         db_cursor.execute(CREATE_GOG_FILES_QUERY)
         db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
         db_cursor.execute(CREATE_GOG_FORUMS_QUERY)
-        db_cursor.execute('CREATE UNIQUE INDEX gfr_name_index ON gog_forums (gfr_name)')
         db_cursor.execute(CREATE_GOG_INSTALLERS_DELTA_QUERY)
         db_cursor.execute('CREATE INDEX gid_int_id_os_index ON gog_installers_delta (gid_int_id, gid_int_os)')
         db_cursor.execute(CREATE_GOG_PRICES_QUERY)
