@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.21
-@date: 23/07/2022
+@version: 3.23
+@date: 20/08/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -227,9 +227,13 @@ if scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
     
     update_scan_section = configParser['UPDATE_SCAN']
-    #product_id will restart from scan_id
-    ID_SAVE_INTERVAL = update_scan_section.getint('id_save_interval')
-    last_id = update_scan_section.getint('last_id')
+    
+    try:
+        last_id = update_scan_section.getint('last_id')
+    except ValueError:
+        last_id = 0
+    
+    ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
     
     if last_id > 0:
         logger.info(f'Restarting update scan from id: {last_id}.')
@@ -277,7 +281,7 @@ if scan_mode == 'update':
                                 #forcefully terminate script
                                 terminate_script()
                                 
-                    if not terminate_signal and last_id_counter != 0 and last_id_counter % ID_SAVE_INTERVAL == 0:
+                    if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -326,7 +330,7 @@ elif scan_mode == 'archive':
 if not terminate_signal and scan_mode == 'update':
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
-    configParser['UPDATE_SCAN']['last_id'] = '0'
+    configParser['UPDATE_SCAN']['last_id'] = ''
             
     with open(conf_file_full_path, 'w') as file:
         configParser.write(file)

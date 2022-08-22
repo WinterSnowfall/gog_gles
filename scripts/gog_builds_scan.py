@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.21
-@date: 23/07/2022
+@version: 3.23
+@date: 20/08/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -22,7 +22,7 @@ from shutil import copy2
 from configparser import ConfigParser
 from datetime import datetime
 from time import sleep
-from queue import Queue
+from queue import Queue, Empty
 from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
 #uncomment for debugging purposes only
@@ -68,10 +68,12 @@ INSERT_INSTALLERS_DELTA_QUERY = 'INSERT INTO gog_installers_delta VALUES (?,?,?,
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
 
-#static regex pattern for removing GOG version strings from builds/installers
-GOG_VERSION_REMOVAL_REGEX = re.compile('GOG[0-9]{0,5}')
 #value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
+#number of seconds a thread will wait to get an item from a queue
+QUEUE_WAIT_TIMEOUT = 5
+#thead sync timeout interval in seconds
+THREAD_SYNC_TIMEOUT = 20.0
 
 def sigterm_handler(signum, frame):
     logger.info('Stopping scan due to SIGTERM...')
@@ -257,48 +259,61 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
 def worker_thread(thread_number, scan_mode):
     global terminate_signal
     
+    queue_empty = False
     threadConfigParser = ConfigParser()
     
     with requests.Session() as threadSession:
         with sqlite3.connect(db_file_full_path) as thread_db_connection:
-            while not terminate_signal:
-                product_id, os = queue.get()
-                
-                retry_counter = 0
-                retries_complete = False
-                
-                while not retries_complete and not terminate_signal:
-                    if retry_counter > 0:                    
-                        logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
-                        #main iternation incremental sleep
-                        sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
+            logger.info(f'Starting thread T#{thread_number}...')
+            
+            while not queue_empty and not terminate_signal:
+                try:
+                    product_id, os = queue.get(True, QUEUE_WAIT_TIMEOUT)
                     
-                    retries_complete = gog_builds_query(product_id, os, scan_mode, threadSession, thread_db_connection)
+                    retry_counter = 0
+                    retries_complete = False
+                    
+                    while not retries_complete and not terminate_signal:
+                        if retry_counter > 0:                    
+                            logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
+                            #main iternation incremental sleep
+                            sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
                         
-                    if retries_complete:
-                        if retry_counter > 0:
-                            logger.info(f'T#{thread_number} >>> Succesfully retried for {product_id}, {os}.')
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process.')    
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
+                        retries_complete = gog_builds_query(product_id, os, scan_mode, threadSession, thread_db_connection)
+                            
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'T#{thread_number} >>> Succesfully retried for {product_id}, {os}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process.')    
+                                terminate_signal = True
+                                #forcefully terminate script
+                                terminate_script()
+                        
+                    #only do product_id processing on 'windows' build scans
+                    if os == 'windows' and product_id % ID_SAVE_INTERVAL == 0 and not terminate_signal:
+                        with config_lock:
+                            threadConfigParser.read(conf_file_full_path)
+                            threadConfigParser['FULL_SCAN']['start_id'] = str(product_id)
+                        
+                            with open(conf_file_full_path, 'w') as file:
+                                threadConfigParser.write(file)
+                        
+                        logger.info(f'T#{thread_number} >>> Processed up to id: {product_id}...')
                     
-                #only do product_id processing on 'windows' build scans
-                if not terminate_signal and os == 'windows' and product_id % ID_SAVE_INTERVAL == 0:
-                    with config_lock:
-                        threadConfigParser.read(conf_file_full_path)
-                        threadConfigParser['FULL_SCAN']['start_id'] = str(product_id)
+                    queue.task_done()
                     
-                        with open(conf_file_full_path, 'w') as file:
-                            threadConfigParser.write(file)
+                except Empty:
+                    logger.debug(f'T#{thread_number} >>> Timed out while waiting for queue.')
+                    queue_empty = True
                     
-                    logger.info(f'T#{thread_number} >>> Processed up to id: {product_id}...')
-                
-                queue.task_done()
+            logger.info(f'Stopping thread T#{thread_number}...')
+            
+            logger.debug('Running PRAGMA optimize...')
+            thread_db_connection.execute(OPTIMIZE_QUERY)
       
 ##main thread start
 
@@ -378,9 +393,6 @@ if scan_mode == 'full':
     #catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
     
-    #theads sync (on exit) timeout interval (seconds)
-    THREAD_SYNC_TIMEOUT = 30
-    
     full_scan_section = configParser['FULL_SCAN']
     ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
     #number of active connection threads
@@ -395,20 +407,21 @@ if scan_mode == 'full':
     
     logger.info(f'Restarting scan from id: {product_id}.')
     
+    stop_id_reached = False
     queue = Queue(CONNECTION_THREADS * 2)
+    thread_list = []
     
     try:
         for thread_no in range(CONNECTION_THREADS):
             #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
             THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
             thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
-            
-            logger.info(f'Starting thread T#{thread_no_nice}...')
             #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
             thread = threading.Thread(target=worker_thread, args=(thread_no_nice, scan_mode), daemon=True)
             thread.start()
+            thread_list.append(thread)
     
-        while not terminate_signal and product_id <= stop_id:
+        while not stop_id_reached and not terminate_signal:
             logger.debug(f'Processing the following product_id: {product_id}.')
             #will block by default if the queue is full
             queue.put((product_id, 'windows'))
@@ -416,37 +429,31 @@ if scan_mode == 'full':
             queue.put((product_id, 'osx'))
             product_id += 1
         
-        #simulate a regular keyboard stop when stop_id is reached
-        if product_id > stop_id:
-            logger.info(f'Stop id of {stop_id} reached. Halting processing...')
-            
-            #write the stop_id as the start_id in the config file
-            configParser.read(conf_file_full_path)
-            configParser['FULL_SCAN']['start_id'] = str(product_id)
-                    
-            with open(conf_file_full_path, 'w') as file:
-                configParser.write(file)
-                
-            raise KeyboardInterrupt
+            if product_id > stop_id:
+                logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+                stop_id_reached = True
                 
     except KeyboardInterrupt:
         terminate_signal = True
-        terminate_sync_counter = 0
         
-        logger.info('Waiting for all threads to complete...')
-        #sleep until all threads except the main thread finish processing
-        while threading.activeCount() > 1 and terminate_sync_counter <= THREAD_SYNC_TIMEOUT:
-            sleep(1)
-            terminate_sync_counter += 1
+    finally:
+        logger.info('Waiting for the worker threads to complete...')
         
-        if terminate_sync_counter > THREAD_SYNC_TIMEOUT:
-            logger.warning('Thread sync on exit interval exceeded! Any stuck threads will now be terminated.')
+        for thread in thread_list:
+            thread.join(THREAD_SYNC_TIMEOUT)
+            
+        logger.info('The worker threads have been stopped.')
     
 elif scan_mode == 'update':
     logger.info('--- Running in UPDATE scan mode ---')
     
     update_scan_section = configParser['UPDATE_SCAN']
-    last_id = update_scan_section.getint('last_id')
+    
+    try:
+        last_id = update_scan_section.getint('last_id')
+    except ValueError:
+        last_id = 0
+    
     ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
     
     if last_id > 0:
@@ -499,7 +506,7 @@ elif scan_mode == 'update':
                                 #forcefully terminate script
                                 terminate_script()
                             
-                    if not terminate_signal and last_id_counter != 0 and last_id_counter % ID_SAVE_FREQUENCY == 0:
+                    if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_signal:
                         configParser.read(conf_file_full_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
@@ -578,7 +585,11 @@ elif scan_mode == 'manual':
     manual_scan_section = configParser['MANUAL_SCAN']
     #load the product id list to process
     id_list = manual_scan_section.get('id_list')
-    id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
+    try:
+        id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
+    except ValueError:
+        logger.critical('Could not parse id list!')
+        raise SystemExit(4)
     
     try:
         with requests.Session() as session:
@@ -623,6 +634,8 @@ elif scan_mode == 'delta':
     
     #strip any punctuation or other grouping characters from builds/versions
     STRIP_OUT_LIST = [' ', ',', '.', '-', '_', '[', ']', '(', ')', '{', '}', '/', '\\']
+    #static regex pattern for removing GOG version strings from builds/installers
+    GOG_VERSION_REMOVAL_REGEX = re.compile('GOG[0-9]{0,5}')
     
     detected_discrepancies = {'windows': [], 'osx': []}
     
@@ -694,7 +707,7 @@ elif scan_mode == 'delta':
                         current_latest_build_version = current_latest_build_version[1:]
                         current_latest_file_version = current_latest_file_version[1:]
                         
-                    #strip any version/build set that starts with the letter 'A'
+                    #strip any version/build set that ends with the letter 'A'
                     if current_latest_build_version.endswith('A') and current_latest_file_version.endswith('A'):
                         current_latest_build_version = current_latest_build_version[:-1]
                         current_latest_file_version = current_latest_file_version[:-1]
@@ -706,7 +719,7 @@ elif scan_mode == 'delta':
                     logger.debug(f'Comparison file version is: {current_latest_file_version}.')
                     
                     #exclude any blank entries (blanked after previous filtering)
-                    #as well as some weird corner-case matches due to GOG versioning madness
+                    #as well as some weird corner-case matches due to GOG's versioning madness
                     if current_latest_file_version == '' or current_latest_build_version == '':
                         excluded = True
                     elif current_latest_build_version[0] == 'V' and current_latest_build_version[1:] == current_latest_file_version:
@@ -837,7 +850,7 @@ elif scan_mode == 'removed':
 if not terminate_signal and scan_mode == 'update':
     logger.info('Resetting last_id parameter...')
     configParser.read(conf_file_full_path)
-    configParser['UPDATE_SCAN']['last_id'] = '0'
+    configParser['UPDATE_SCAN']['last_id'] = ''
                     
     with open(conf_file_full_path, 'w') as file:
         configParser.write(file)
