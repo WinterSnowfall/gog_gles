@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.23
-@date: 20/08/2022
+@version: 3.24
+@date: 12/09/2022
 
 Warning: Built for use with python 3.6+
 '''
 
 import sqlite3
+import signal
 import requests
 import logging
 import argparse
@@ -26,11 +27,11 @@ configParser = ConfigParser()
 terminate_signal = False
 
 ##conf file block
-conf_file_full_path = os.path.join('..', 'conf', 'gog_forums_scan.conf')
+conf_file_path = os.path.join('..', 'conf', 'gog_forums_scan.conf')
 
 ##logging configuration block
-log_file_full_path = os.path.join('..', 'logs', 'gog_forums_scan.log')
-logger_file_handler = RotatingFileHandler(log_file_full_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
+log_file_path = os.path.join('..', 'logs', 'gog_forums_scan.log')
+logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
@@ -41,10 +42,20 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
+db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 INSERT_FORUM_QUERY = 'INSERT INTO gog_forums VALUES (?,?,?,?,?)'
+
+OPTIMIZE_QUERY = 'PRAGMA optimize'
+
+def terminate_script():
+    logger.critical('Forcefully stopping script!')
+    
+    #flush buffers
+    os.sync()
+    #forcefully terminate script process
+    os.kill(os.getpid(), signal.SIGKILL)
         
 def gog_forums_query(session, db_connection):
     
@@ -155,7 +166,7 @@ logger.info('*** Running FORUMS scan script ***')
 
 try:
     #reading from config file
-    configParser.read(conf_file_full_path)
+    configParser.read(conf_file_path)
     general_section = configParser['GENERAL']
     #parsing generic parameters
     db_backup = general_section.get('db_backup')
@@ -169,9 +180,9 @@ except:
 
 #boolean 'true' or scan_mode specific activation
 if db_backup == 'true':
-    if os.path.exists(db_file_full_path):
+    if os.path.exists(db_file_path):
         #create a backup of the existing db - mostly for debugging/recovery
-        copy2(db_file_full_path, db_file_full_path + '.bak')
+        copy2(db_file_path, db_file_path + '.bak')
         logger.info('Successfully created db backup.')
     else:
         #subprocess.run(['python', 'gog_create_db.py'])
@@ -180,32 +191,34 @@ if db_backup == 'true':
     
 try:
     logger.info('Starting forums scan...')
-        
-    with sqlite3.connect(db_file_full_path) as db_connection:
-        with requests.Session() as session:
-            retries_complete = False
-            retry_counter = 0
-                    
-            while not retries_complete and not terminate_signal:
+    
+    with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+        retries_complete = False
+        retry_counter = 0
+                
+        while not retries_complete and not terminate_signal:
+            if retry_counter > 0:
+                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                sleep(RETRY_SLEEP_INTERVAL)
+                logger.warning(f'Reprocessing forum entries...')
+                
+            retries_complete = gog_forums_query(session, db_connection)
+            
+            if retries_complete:
                 if retry_counter > 0:
-                    logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                    sleep(RETRY_SLEEP_INTERVAL)
-                    logger.warning(f'Reprocessing forum entries...')
+                    logger.info(f'Succesfully retried forum entries.')
+            
+            else:
+                retry_counter += 1
+                #terminate the scan if the RETRY_COUNT limit is exceeded
+                if retry_counter > RETRY_COUNT:
+                    logger.critical('Retry count exceeded, terminating scan!')
+                    terminate_signal = True
+                    #forcefully terminate script
+                    terminate_script()
                     
-                retries_complete = gog_forums_query(session, db_connection)
-                
-                if retries_complete:
-                    if retry_counter > 0:
-                        logger.info(f'Succesfully retried forum entries.')
-                
-                else:
-                    retry_counter += 1
-                    #terminate the scan if the RETRY_COUNT limit is exceeded
-                    if retry_counter > RETRY_COUNT:
-                        logger.critical('Retry count exceeded, terminating scan!')
-                        terminate_signal = True
-                        #forcefully terminate script
-                        terminate_script()
+        logger.debug('Running PRAGMA optimize...')
+        db_connection.execute(OPTIMIZE_QUERY)
                     
 except KeyboardInterrupt:
     terminate_signal = True

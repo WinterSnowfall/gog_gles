@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.23
-@date: 20/08/2022
+@version: 3.24
+@date: 12/09/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,8 +13,8 @@ import argparse
 import os
 
 ##logging configuration block
-log_file_full_path = os.path.join('..', 'logs', 'gog_create_db.log')
-logger_file_handler = logging.FileHandler(log_file_full_path, mode='w', encoding='utf-8')
+log_file_path = os.path.join('..', 'logs', 'gog_create_db.log')
+logger_file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
@@ -25,7 +25,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
+db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -73,7 +73,8 @@ CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int
                                      'gid_int_os TEXT NOT NULL, '
                                      'gid_int_latest_galaxy_build TEXT NOT NULL, '
                                      'gid_int_latest_installer_version TEXT NOT NULL, '
-                                     'gid_int_false_positive INTEGER NOT NULL)')
+                                     'gid_int_false_positive INTEGER NOT NULL, '
+                                     'gid_int_false_positive_reason TEXT)')
 
 CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
                            'gpr_int_added TEXT NOT NULL, '
@@ -147,10 +148,10 @@ parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_gles) 
 args = parser.parse_args()
 
 #db file check/creation section
-if not os.path.exists(db_file_full_path):
+if not os.path.exists(db_file_path):
     logger.info('No DB file detected. Creating new SQLite DB...')
     
-    with sqlite3.connect(db_file_full_path) as db_connection:
+    with sqlite3.connect(db_file_path) as db_connection:
         db_cursor = db_connection.cursor()
         db_cursor.execute(CREATE_GOG_BUILDS_QUERY)
         db_cursor.execute('CREATE UNIQUE INDEX gb_int_id_os_index ON gog_builds (gb_int_id, gb_int_os)')

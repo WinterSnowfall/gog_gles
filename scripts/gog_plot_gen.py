@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.23
-@date: 20/08/2022
+@version: 3.24
+@date: 12/09/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -25,8 +25,8 @@ from matplotlib.ticker import ScalarFormatter
 file_date = datetime.now().strftime('%Y%m%d')
 
 ##logging configuration block
-log_file_full_path = os.path.join('..', 'logs', 'gog_plot_gen.log')
-logger_file_handler = logging.FileHandler(log_file_full_path, mode='w', encoding='utf-8')
+log_file_path = os.path.join('..', 'logs', 'gog_plot_gen.log')
+logger_file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
@@ -37,7 +37,7 @@ logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
-db_file_full_path = os.path.join('..', 'output_db', 'gog_gles.db')
+db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
 OPTIMIZE_QUERY = 'PRAGMA optimize'
@@ -263,7 +263,7 @@ if len(argv) > 1:
 if plot_mode == 'timeline':
     logger.info('--- Running in ID TIMELINE mode ---')
     
-    with sqlite3.connect(db_file_full_path) as db_connection:
+    with sqlite3.connect(db_file_path) as db_connection:
         plot_id_timeline(plot_mode, db_connection)
         
         logger.debug('Running PRAGMA optimize...')
@@ -272,7 +272,7 @@ if plot_mode == 'timeline':
 elif plot_mode == 'distribution':
     logger.info('--- Running in ID DISTRIBUTION mode (all) ---')
     
-    with sqlite3.connect(db_file_full_path) as db_connection:
+    with sqlite3.connect(db_file_path) as db_connection:
         plot_id_distribution(plot_mode, db_connection)
         
         logger.debug('Running PRAGMA optimize...')
@@ -281,7 +281,7 @@ elif plot_mode == 'distribution':
 elif plot_mode == 'incremental':
     logger.info('--- Running in ID DISTRIBUTION mode (incremental) ---')
     
-    with sqlite3.connect(db_file_full_path) as db_connection:
+    with sqlite3.connect(db_file_path) as db_connection:
         plot_id_distribution(plot_mode, db_connection)
         
         logger.debug('Running PRAGMA optimize...')
