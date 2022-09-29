@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.24
-@date: 12/09/2022
+@version: 3.25
+@date: 28/09/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -523,10 +523,10 @@ elif scan_mode == 'products':
     logger.info('--- Running in PRODUCTS scan mode ---')
     
     #blank the filter for a really thorough scan, although it usually doesn't make sense (but not always,
-    #since some "pack" and "dlc" entries do have builds linked to them... hopefully just GOGBears tripping)
+    #since some 'pack' and 'dlc' entries do have builds linked to them... hopefully just GOGBears tripping)
     #GAME_TYPE_FILTER = ''
     #filtering by game_type will drastically reduce the number of scanned ids
-    GAME_TYPE_FILTER = ' AND gp_game_type = "game"'
+    GAME_TYPE_FILTER = ' AND gp_game_type = \'game\''
     
     try:
         logger.info('Starting builds scan (based on products) on all applicable DB entries...')
@@ -658,7 +658,7 @@ elif scan_mode == 'delta':
                 current_main_version_names = delta_entry[3].split(MVF_VALUE_SEPARATOR)
                 logger.debug(f'Current builds main version names are: {current_main_version_names}.')
 
-                #restricing languages to "en" only will solve a lot of version discrepancy problems, 
+                #restricing languages to 'en' only will solve a lot of version discrepancy problems, 
                 #as some installers get misversioned non-english languages added at later points in time, 
                 #however the following titles will no longer be tracked because of this 
                 #(mentioning them here for future reference):
@@ -668,9 +668,9 @@ elif scan_mode == 'delta':
                 #Anstoss 2 Gold Edition    1808817480    de
                 #ANSTOSS 3: Der Fußballmanager    1886141726    de
                 #
-                db_cursor = db_connection.execute('SELECT DISTINCT gf_version FROM gog_files WHERE gf_int_id = ? AND '
-                                                  'gf_int_removed IS NULL AND gf_language = "en" AND gf_int_download_type = "installer" AND '
-                                                  'gf_os = ? AND gf_version IS NOT NULL ORDER BY gf_int_added DESC LIMIT 1', 
+                db_cursor = db_connection.execute('SELECT DISTINCT gf_version FROM gog_files WHERE gf_int_id = ? AND gf_int_removed IS NULL '
+                                                  'AND gf_language = \'en\' AND gf_int_download_type = \'installer\' AND gf_os = ? '
+                                                  'AND gf_version IS NOT NULL ORDER BY gf_int_added DESC LIMIT 1', 
                                                   (current_product_id, current_os_files))
                 latest_version = db_cursor.fetchone()
                 
@@ -686,9 +686,8 @@ elif scan_mode == 'delta':
                     current_latest_build_version = current_latest_build_version_orig.upper()
                     current_latest_file_version = current_latest_file_version_orig.upper()
                                         
-                    #remove any (A) identifier from build versions
+                    #remove any (A) identifiers from builds/installers
                     current_latest_build_version = current_latest_build_version.replace('(A)', '')
-                    #remove any (A) identifier from file versions
                     current_latest_file_version = current_latest_file_version.replace('(A)', '')
                     
                     #remove any 'GALAXY HOTFIX' and 'GOG HOTFIX' strings from build versions

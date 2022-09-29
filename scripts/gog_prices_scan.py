@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.24
-@date: 12/09/2022
+@version: 3.25
+@date: 28/09/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -88,14 +88,14 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                         #remove currency value from all price values along with any whitespace
                         base_price_str = json_item['basePrice'].replace(currency,'').strip()
                         if base_price_str != '0':
-                            base_price = float(base_price_str[:-2] + "." + base_price_str[-2:])
+                            base_price = float(''.join((base_price_str[:-2], '.', base_price_str[-2:])))
                         else:
                             base_price = 0
                         logger.debug(f'PQ >>> base_price is: {base_price}.')
                         
                         final_price_str = json_item['finalPrice'].replace(currency,'').strip()
                         if final_price_str != '0':
-                            final_price = float(final_price_str[:-2] + "." + final_price_str[-2:])
+                            final_price = float(''.join((final_price_str[:-2], '.', final_price_str[-2:])))
                         else:
                             final_price = 0
                         logger.debug(f'PQ >>> final_price is: {final_price}.')
@@ -129,9 +129,9 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                     else:
                         logger.debug(f'PQ >>> {currency} is not in currencies_list. Skipping.')
         
-        #HTTP 400 error code, issued for products that are not sold or no longer sold
+        #HTTP error code 400, issued for products that are not sold or no longer sold
         elif response.status_code == 400:
-            logger.debug(f'PQ >>> "Bad Request" 400 HTTP error code received for {product_id}.')
+            logger.debug(f'PQ >>> HTTP error code 400 (Bad Request) received for {product_id}.')
         
         else:
             logger.warning(f'PQ >>> HTTP error code {response.status_code} received for {product_id}.')

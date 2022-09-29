@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.24
-@date: 12/09/2022
+@version: 3.25
+@date: 28/09/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -341,7 +341,7 @@ def gog_product_extended_query(product_id, scan_mode, session, db_connection):
                 cs_compat_linux = json_parsed['content_system_compatibility']['linux']
                 #process languages
                 if len(json_parsed['languages']) > 0:
-                    languages = MVF_VALUE_SEPARATOR.join([f'{language_key}: {json_parsed["languages"][language_key]}' 
+                    languages = MVF_VALUE_SEPARATOR.join([''.join((language_key, ': ', json_parsed['languages'][language_key])) 
                                                           for language_key in json_parsed['languages'].keys()])
                 else:
                     languages = None
@@ -619,7 +619,7 @@ def gog_files_extract_parser(db_connection, product_id):
     
     #process installer entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
-                      'AND gf_int_download_type = "installer" AND gf_int_removed IS NULL', (product_id,))
+                      'AND gf_int_download_type = \'installer\' AND gf_int_removed IS NULL', (product_id,))
     listed_installer_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
         
     for installer_entry in json_parsed_installers:
@@ -638,11 +638,11 @@ def gog_files_extract_parser(db_connection, product_id):
             installer_file_size = installer_file['size']
             
             if installer_version is not None:
-                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'installer\' AND gf_id = ? '
                                   'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, installer_id, installer_os, installer_language, installer_version, installer_file_id, installer_file_size))
             else:
-                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "installer" AND gf_id = ? '
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'installer\' AND gf_id = ? '
                                   'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, installer_id, installer_os, installer_language, installer_file_id, installer_file_size))
               
@@ -670,7 +670,7 @@ def gog_files_extract_parser(db_connection, product_id):
     
     #process patch entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
-                      'AND gf_int_download_type = "patch" AND gf_int_removed IS NULL', (product_id,))
+                      'AND gf_int_download_type = \'patch\' AND gf_int_removed IS NULL', (product_id,))
     listed_patch_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
     
     for patch_entry in json_parsed_patches:
@@ -691,11 +691,11 @@ def gog_files_extract_parser(db_connection, product_id):
             patch_file_size = patch_file['size']
                 
             if patch_version is not None:
-                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'patch\' AND gf_id = ? '
                                   'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, patch_id, patch_os, patch_language, patch_version, patch_file_id, patch_file_size))
             else:
-                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "patch" AND gf_id = ? '
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'patch\' AND gf_id = ? '
                                   'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, patch_id, patch_os, patch_language, patch_file_id, patch_file_size))
                 
@@ -723,7 +723,7 @@ def gog_files_extract_parser(db_connection, product_id):
     
     #process language_packs entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
-                      'AND gf_int_download_type = "language_packs" AND gf_int_removed IS NULL', (product_id,))
+                      'AND gf_int_download_type = \'language_packs\' AND gf_int_removed IS NULL', (product_id,))
     listed_language_packs_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
     
     for language_pack_entry in json_parsed_language_packs:
@@ -742,12 +742,12 @@ def gog_files_extract_parser(db_connection, product_id):
             language_pack_file_size = language_pack_file['size']
                 
             if language_pack_version is not None:
-                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'language_packs\' AND gf_id = ? '
                                   'AND gf_os = ? AND gf_language = ? AND gf_version = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, language_pack_id, language_pack_os, language_pack_language, language_pack_version, 
                                    language_pack_file_id, language_pack_file_size))
             else:
-                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "language_packs" AND gf_id = ? '
+                db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'language_packs\' AND gf_id = ? '
                                   'AND gf_os = ? AND gf_language = ? AND gf_version IS NULL AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                                   (product_id, language_pack_id, language_pack_os, language_pack_language, 
                                    language_pack_file_id, language_pack_file_size))
@@ -776,7 +776,7 @@ def gog_files_extract_parser(db_connection, product_id):
                 
     #process bonus_content entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
-                      'AND gf_int_download_type = "bonus_content" AND gf_int_removed IS NULL', (product_id,))
+                      'AND gf_int_download_type = \'bonus_content\' AND gf_int_removed IS NULL', (product_id,))
     listed_bonus_content_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
     
     for bonus_content_entry in json_parsed_bonus_content:
@@ -791,7 +791,7 @@ def gog_files_extract_parser(db_connection, product_id):
             bonus_content_file_id = bonus_content_file['id']
             bonus_content_file_size = bonus_content_file['size']
             
-            db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = "bonus_content" AND gf_id = ? '
+            db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? AND gf_int_download_type = \'bonus_content\' AND gf_id = ? '
                               'AND gf_type = ? AND gf_count = ? AND gf_file_id = ? AND gf_file_size = ? AND gf_int_removed IS NULL', 
                               (product_id, bonus_content_id, bonus_content_type, bonus_content_count, bonus_content_file_id, bonus_content_file_size))
             

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.24
-@date: 12/09/2022
+@version: 3.25
+@date: 28/09/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -28,7 +28,7 @@ logger.addHandler(logger_file_handler)
 db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 
 ##CONSTANTS
-CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY KEY, '
                            'gb_int_added TEXT NOT NULL, '
                            'gb_int_removed TEXT, '
                            'gb_int_updated TEXT, '
@@ -43,7 +43,7 @@ CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY K
                            'gb_branch_version_names TEXT, '
                            'gb_has_private_branches INTEGER NOT NULL)')
 
-CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY, '
                           'gf_int_added TEXT NOT NULL, '
                           'gf_int_removed TEXT, '
                           'gf_int_id INTEGER NOT NULL, '
@@ -59,13 +59,13 @@ CREATE_GOG_FILES_QUERY = ('CREATE TABLE gog_files (gf_int_nr INTEGER PRIMARY KEY
                           'gf_file_id TEXT NOT NULL, '
                           'gf_file_size INTEGER NOT NULL)')
 
-CREATE_GOG_FORUMS_QUERY = ('CREATE TABLE gog_forums (gfr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_FORUMS_QUERY = ('CREATE TABLE gog_forums (gfr_int_nr INTEGER PRIMARY KEY, '
                           'gfr_int_added TEXT NOT NULL, '
                           'gfr_int_removed TEXT, '
                           'gfr_name TEXT UNIQUE NOT NULL, '
                           'gfr_link TEXT NOT NULL)')
 
-CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int_nr INTEGER PRIMARY KEY, '
                                      'gid_int_added TEXT NOT NULL, '
                                      'gid_int_fixed TEXT, '
                                      'gid_int_id INTEGER NOT NULL, '
@@ -76,7 +76,7 @@ CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int
                                      'gid_int_false_positive INTEGER NOT NULL, '
                                      'gid_int_false_positive_reason TEXT)')
 
-CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY KEY, '
                            'gpr_int_added TEXT NOT NULL, '
                            'gpr_int_outdated TEXT, '
                            'gpr_int_id INTEGER NOT NULL, '
@@ -86,7 +86,7 @@ CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY 
                            'gpr_base_price REAL NOT NULL, '
                            'gpr_final_price REAL NOT NULL)')
 
-CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMARY KEY, '
                              'gp_int_added TEXT NOT NULL, '
                              'gp_int_delisted TEXT, '
                              'gp_int_updated TEXT, '
@@ -123,7 +123,7 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_description_cool TEXT, '
                              'gp_changelog TEXT)')
 
-CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMARY KEY AUTOINCREMENT, '
+CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMARY KEY, '
                              'gr_int_added TEXT NOT NULL, '
                              'gr_int_delisted TEXT, '
                              'gr_int_updated TEXT, '
