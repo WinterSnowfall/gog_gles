@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.25
-@date: 28/09/2022
+@version: 3.40
+@date: 06/11/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -32,14 +32,16 @@ from logging.handlers import RotatingFileHandler
 configParser = ConfigParser()
 db_lock = threading.Lock()
 config_lock = threading.Lock()
-terminate_signal = False
+##shared thread events
+terminate_event = threading.Event()
+terminate_event.clear()
 
 ##conf file block
 conf_file_path = os.path.join('..', 'conf', 'gog_builds_scan.conf')
 
 ##logging configuration block
 log_file_path = os.path.join('..', 'logs', 'gog_builds_scan.log')
-logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
+logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=25165824, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
@@ -256,24 +258,22 @@ def gog_builds_query(product_id, os, scan_mode, session, db_connection):
         #logger.error(traceback.format_exc())
         return False
     
-def worker_thread(thread_number, scan_mode):
-    global terminate_signal
-    
+def worker_thread(thread_number, scan_mode, terminate_event):
     queue_empty = False
     threadConfigParser = ConfigParser()
     
     with requests.Session() as threadSession, sqlite3.connect(db_file_path) as thread_db_connection:
         logger.info(f'Starting thread T#{thread_number}...')
         
-        while not queue_empty and not terminate_signal:
+        while not queue_empty and not terminate_event.is_set():
             try:
                 product_id, os = queue.get(True, QUEUE_WAIT_TIMEOUT)
                 
                 retry_counter = 0
                 retries_complete = False
                 
-                while not retries_complete and not terminate_signal:
-                    if retry_counter > 0:                    
+                while not retries_complete and not terminate_event.is_set():
+                    if retry_counter > 0:
                         logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
                         #main iternation incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
@@ -288,12 +288,12 @@ def worker_thread(thread_number, scan_mode):
                         #terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
                             logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process.')    
-                            terminate_signal = True
+                            terminate_event.set()
                             #forcefully terminate script
                             terminate_script()
                     
                 #only do product_id processing on 'windows' build scans
-                if os == 'windows' and product_id % ID_SAVE_INTERVAL == 0 and not terminate_signal:
+                if os == 'windows' and product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
                         threadConfigParser.read(conf_file_path)
                         threadConfigParser['FULL_SCAN']['start_id'] = str(product_id)
@@ -314,555 +314,554 @@ def worker_thread(thread_number, scan_mode):
         logger.debug('Running PRAGMA optimize...')
         thread_db_connection.execute(OPTIMIZE_QUERY)
       
-##main thread start
-
-logger.info('*** Running BUILDS scan script ***')
-
-parser = argparse.ArgumentParser(description=('GOG builds scan (part of gog_gles) - a script to call publicly available GOG APIs '
-                                              'in order to retrieve builds information and updates.'))
-
-group = parser.add_mutually_exclusive_group()
-group.add_argument('-u', '--update', help='Perform an update builds scan', action='store_true')
-group.add_argument('-f', '--full', help='Perform a full builds scan', action='store_true')
-group.add_argument('-p', '--products', help='Perform a products-based builds scan', action='store_true')
-group.add_argument('-m', '--manual', help='Perform a manual builds scan', action='store_true')
-group.add_argument('-d', '--delta', help='Produce a list of ids whose latest builds are exclusive to Galaxy', action='store_true')
-group.add_argument('-r', '--removed', help='Perform a scan on all the removed builds', action='store_true')
-
-args = parser.parse_args()
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description=('GOG builds scan (part of gog_gles) - a script to call publicly available GOG APIs '
+                                                  'in order to retrieve builds information and updates.'))
     
-try:
-    #reading from config file
-    configParser.read(conf_file_path)
-    general_section = configParser['GENERAL']
-    #parsing generic parameters
-    conf_backup = general_section.get('conf_backup')
-    db_backup = general_section.get('db_backup')
-    scan_mode = general_section.get('scan_mode')
-    #parsing constants
-    HTTP_TIMEOUT = general_section.getint('http_timeout')
-    RETRY_COUNT = general_section.getint('retry_count')
-    RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
-    RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
-except:
-    logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
-    raise SystemExit(1)
-
-#detect any parameter overrides and set the scan_mode accordingly
-if len(argv) > 1:
-    logger.info('Command-line parameter mode override detected.')
-
-    if args.update:
-        scan_mode = 'update'
-    elif args.full:
-        scan_mode = 'full'
-    elif args.products:
-        scan_mode = 'products'
-    elif args.manual:
-        scan_mode = 'manual'
-    elif args.delta:
-        scan_mode = 'delta'
-    elif args.removed:
-        scan_mode = 'removed'
-
-#boolean 'true' or scan_mode specific activation
-if conf_backup == 'true' or conf_backup == scan_mode:
-    if os.path.exists(conf_file_path):
-        #create a backup of the existing conf file - mostly for debugging/recovery
-        copy2(conf_file_path, conf_file_path + '.bak')
-        logger.info('Successfully created conf file backup.')
-    else:
-        logger.critical('Could find specified conf file!')
-        raise SystemExit(2)
-
-#boolean 'true' or scan_mode specific activation
-if db_backup == 'true' or db_backup == scan_mode:
-    if os.path.exists(db_file_path):
-        #create a backup of the existing db - mostly for debugging/recovery
-        copy2(db_file_path, db_file_path + '.bak')
-        logger.info('Successfully created DB backup.')
-    else:
-        #subprocess.run(['python', 'gog_create_db.py'])
-        logger.critical('Could find specified DB file!')
-        raise SystemExit(3)
-
-if scan_mode == 'full':
-    logger.info('--- Running in FULL scan mode ---')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-u', '--update', help='Perform an update builds scan', action='store_true')
+    group.add_argument('-f', '--full', help='Perform a full builds scan', action='store_true')
+    group.add_argument('-p', '--products', help='Perform a products-based builds scan', action='store_true')
+    group.add_argument('-m', '--manual', help='Perform a manual builds scan', action='store_true')
+    group.add_argument('-d', '--delta', help='Produce a list of ids whose latest builds are exclusive to Galaxy', action='store_true')
+    group.add_argument('-r', '--removed', help='Perform a scan on all the removed builds', action='store_true')
     
-    #catch SIGTERM and exit gracefully
-    signal.signal(signal.SIGTERM, sigterm_handler)
+    args = parser.parse_args()
     
-    full_scan_section = configParser['FULL_SCAN']
-    ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
-    #number of active connection threads
-    CONNECTION_THREADS = full_scan_section.getint('connection_threads')
-    #stop_id = 2147483647, in order to scan the full range,
-    #stopping at the upper limit of a 32 bit signed integer type
-    stop_id = full_scan_section.getint('stop_id')
-    #product_id will restart from scan_id
-    product_id = full_scan_section.getint('start_id')
-    #reduce starting point by a save interval to account for any thread overlap
-    if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
-    
-    logger.info(f'Restarting scan from id: {product_id}.')
-    
-    stop_id_reached = False
-    queue = Queue(CONNECTION_THREADS * 2)
-    thread_list = []
-    
+    logger.info('*** Running BUILDS scan script ***')
+        
     try:
-        for thread_no in range(CONNECTION_THREADS):
-            #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
-            THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
-            thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
-            #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
-            thread = threading.Thread(target=worker_thread, args=(thread_no_nice, scan_mode), daemon=True)
-            thread.start()
-            thread_list.append(thread)
+        #reading from config file
+        configParser.read(conf_file_path)
+        general_section = configParser['GENERAL']
+        #parsing generic parameters
+        conf_backup = general_section.get('conf_backup')
+        db_backup = general_section.get('db_backup')
+        scan_mode = general_section.get('scan_mode')
+        #parsing constants
+        HTTP_TIMEOUT = general_section.getint('http_timeout')
+        RETRY_COUNT = general_section.getint('retry_count')
+        RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
+        RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
+    except:
+        logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
+        raise SystemExit(1)
     
-        while not stop_id_reached and not terminate_signal:
-            logger.debug(f'Processing the following product_id: {product_id}.')
-            #will block by default if the queue is full
-            queue.put((product_id, 'windows'))
-            #will block by default if the queue is full
-            queue.put((product_id, 'osx'))
-            product_id += 1
+    #detect any parameter overrides and set the scan_mode accordingly
+    if len(argv) > 1:
+        logger.info('Command-line parameter mode override detected.')
+    
+        if args.update:
+            scan_mode = 'update'
+        elif args.full:
+            scan_mode = 'full'
+        elif args.products:
+            scan_mode = 'products'
+        elif args.manual:
+            scan_mode = 'manual'
+        elif args.delta:
+            scan_mode = 'delta'
+        elif args.removed:
+            scan_mode = 'removed'
+    
+    #boolean 'true' or scan_mode specific activation
+    if conf_backup == 'true' or conf_backup == scan_mode:
+        if os.path.exists(conf_file_path):
+            #create a backup of the existing conf file - mostly for debugging/recovery
+            copy2(conf_file_path, conf_file_path + '.bak')
+            logger.info('Successfully created conf file backup.')
+        else:
+            logger.critical('Could find specified conf file!')
+            raise SystemExit(2)
+    
+    #boolean 'true' or scan_mode specific activation
+    if db_backup == 'true' or db_backup == scan_mode:
+        if os.path.exists(db_file_path):
+            #create a backup of the existing db - mostly for debugging/recovery
+            copy2(db_file_path, db_file_path + '.bak')
+            logger.info('Successfully created DB backup.')
+        else:
+            #subprocess.run(['python', 'gog_create_db.py'])
+            logger.critical('Could find specified DB file!')
+            raise SystemExit(3)
+    
+    if scan_mode == 'full':
+        logger.info('--- Running in FULL scan mode ---')
         
-            if product_id > stop_id:
-                logger.info(f'Stop id of {stop_id} reached. Halting processing...')
-                stop_id_reached = True
-                
-    except KeyboardInterrupt:
-        terminate_signal = True
+        #catch SIGTERM and exit gracefully
+        signal.signal(signal.SIGTERM, sigterm_handler)
         
-    finally:
-        logger.info('Waiting for the worker threads to complete...')
+        full_scan_section = configParser['FULL_SCAN']
+        ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
+        #number of active connection threads
+        CONNECTION_THREADS = full_scan_section.getint('connection_threads')
+        #stop_id = 2147483647, in order to scan the full range,
+        #stopping at the upper limit of a 32 bit signed integer type
+        stop_id = full_scan_section.getint('stop_id')
+        #product_id will restart from scan_id
+        product_id = full_scan_section.getint('start_id')
+        #reduce starting point by a save interval to account for any thread overlap
+        if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
         
-        for thread in thread_list:
-            thread.join(THREAD_SYNC_TIMEOUT)
+        logger.info(f'Restarting scan from id: {product_id}.')
+        
+        stop_id_reached = False
+        queue = Queue(CONNECTION_THREADS * 2)
+        thread_list = []
+        
+        try:
+            for thread_no in range(CONNECTION_THREADS):
+                #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
+                THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
+                thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
+                #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
+                thread = threading.Thread(target=worker_thread, 
+                                          args=(thread_no_nice, scan_mode, terminate_event), 
+                                          daemon=True)
+                thread.start()
+                thread_list.append(thread)
+        
+            while not stop_id_reached and not terminate_event.is_set():
+                logger.debug(f'Processing the following product_id: {product_id}.')
+                #will block by default if the queue is full
+                queue.put((product_id, 'windows'))
+                #will block by default if the queue is full
+                queue.put((product_id, 'osx'))
+                product_id += 1
             
-        logger.info('The worker threads have been stopped.')
-    
-elif scan_mode == 'update':
-    logger.info('--- Running in UPDATE scan mode ---')
-    
-    update_scan_section = configParser['UPDATE_SCAN']
-    
-    try:
-        last_id = update_scan_section.getint('last_id')
-    except ValueError:
-        last_id = 0
-    
-    ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
-    
-    if last_id > 0:
-        logger.info(f'Restarting update scan from id: {last_id}.')
-        
-    try:
-        logger.info('Starting builds update scan on all applicable DB entries...')
-        
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            #select all existing ids from the gog_builds table
-            db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_removed IS NULL AND '
-                                              'gb_int_id > ? ORDER BY 1', (last_id, ))
-            id_list = db_cursor.fetchall()
-            logger.debug('Retrieved all applicable product ids from the DB...')
-            
-            #used to track the number of processed ids
-            last_id_counter = 0
-                
-            for id_entry in id_list:
-                current_product_id = id_entry[0]
-                logger.debug(f'Now processing id {current_product_id}...')
-                complete_windows = False
-                complete_osx = False
-                retry_counter = 0
-                
-                while not (complete_windows and complete_osx) and not terminate_signal:
-                    if retry_counter > 0:
-                        sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
-                        logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                        sleep(sleep_interval)
-                            
-                    complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
-                    #try other oses as well, if the 'windows' scan goes well
-                    if complete_windows:
-                        complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
+                if product_id > stop_id:
+                    logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+                    stop_id_reached = True
                     
-                    if complete_windows and complete_osx:
+        except KeyboardInterrupt:
+            terminate_event.set()
+            
+        finally:
+            logger.info('Waiting for the worker threads to complete...')
+            
+            for thread in thread_list:
+                thread.join(THREAD_SYNC_TIMEOUT)
+                
+            logger.info('The worker threads have been stopped.')
+        
+    elif scan_mode == 'update':
+        logger.info('--- Running in UPDATE scan mode ---')
+        
+        update_scan_section = configParser['UPDATE_SCAN']
+        
+        try:
+            last_id = update_scan_section.getint('last_id')
+        except ValueError:
+            last_id = 0
+        
+        ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
+        
+        if last_id > 0:
+            logger.info(f'Restarting update scan from id: {last_id}.')
+            
+        try:
+            logger.info('Starting builds update scan on all applicable DB entries...')
+            
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                #select all existing ids from the gog_builds table
+                db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_removed IS NULL AND '
+                                                  'gb_int_id > ? ORDER BY 1', (last_id, ))
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all applicable product ids from the DB...')
+                
+                #used to track the number of processed ids
+                last_id_counter = 0
+                    
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    complete_windows = False
+                    complete_osx = False
+                    retry_counter = 0
+                    
+                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
                         if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {current_product_id}.')
-                            
-                        last_id_counter += 1
-
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-                        
-                if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_signal:
-                    configParser.read(conf_file_path)
-                    configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
-                    
-                    with open(conf_file_path, 'w') as file:
-                        configParser.write(file)
-                        
-                    logger.info(f'Saved scan up to last_id of {current_product_id}.')
-                
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
-                    
-    except KeyboardInterrupt:
-        terminate_signal = True
-    
-elif scan_mode == 'products':
-    logger.info('--- Running in PRODUCTS scan mode ---')
-    
-    #blank the filter for a really thorough scan, although it usually doesn't make sense (but not always,
-    #since some 'pack' and 'dlc' entries do have builds linked to them... hopefully just GOGBears tripping)
-    #GAME_TYPE_FILTER = ''
-    #filtering by game_type will drastically reduce the number of scanned ids
-    GAME_TYPE_FILTER = ' AND gp_game_type = \'game\''
-    
-    try:
-        logger.info('Starting builds scan (based on products) on all applicable DB entries...')
-        
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            #select all existing ids from the gog_products table which are not already present in the 
-            #gog_builds table and atempt to scan them from matching builds API entries
-            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
-                                              f'(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1)'
-                                              f'{GAME_TYPE_FILTER} ORDER BY 1')
-            id_list = db_cursor.fetchall()
-            logger.debug('Retrieved all applicable product ids from the DB...')
-            
-            for id_entry in id_list:
-                current_product_id = id_entry[0]
-                logger.debug(f'Now processing id {current_product_id}...')
-                complete_windows = False
-                complete_osx = False
-                retry_counter = 0
-                
-                while not (complete_windows and complete_osx) and not terminate_signal:
-                    if retry_counter > 0:
-                        sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
-                        logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                        sleep(sleep_interval)
-                        
-                    complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
-                    #try other oses as well, if the 'windows' scan goes well
-                    if complete_windows:
-                        complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
-                    
-                    if complete_windows and complete_osx:
-                        if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {current_product_id}.')
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-            
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
-        
-    except KeyboardInterrupt:
-        terminate_signal = True
-    
-elif scan_mode == 'manual':
-    logger.info('--- Running in MANUAL scan mode ---')
-    
-    manual_scan_section = configParser['MANUAL_SCAN']
-    #load the product id list to process
-    id_list = manual_scan_section.get('id_list')
-    try:
-        id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
-    except ValueError:
-        logger.critical('Could not parse id list!')
-        raise SystemExit(4)
-    
-    try:
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            for product_id in id_list:
-                logger.info(f'Running scan for id {product_id}...')
-                complete_windows = False
-                complete_osx = False
-                retry_counter = 0
-                
-                while not (complete_windows and complete_osx) and not terminate_signal:
-                    if retry_counter > 0:
-                        logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                        sleep(RETRY_SLEEP_INTERVAL)
-                        logger.warning(f'Reprocessing id {product_id}...')
-                        
-                    complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
-                    #try other oses as well, if the 'windows' scan goes well
-                    if complete_windows:
-                        complete_osx = gog_builds_query(product_id, 'osx', scan_mode, session, db_connection)
-                    
-                    if complete_windows and complete_osx:
-                        if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {product_id}.')
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-        
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
-            
-    except KeyboardInterrupt:
-        terminate_signal = True
-    
-elif scan_mode == 'delta':
-    logger.info('--- Running in DELTA scan mode ---')
-    
-    #strip any punctuation or other grouping characters from builds/versions
-    STRIP_OUT_LIST = [' ', ',', '.', '-', '_', '[', ']', '(', ')', '{', '}', '/', '\\']
-    #static regex pattern for removing end-of-string RC identifier from builds/installers
-    GOG_RC_REMOVAL_REGEX = re.compile('RC[0-9]{1}$')
-    #static regex pattern for removing end-of-string GOG version strings from builds/installers
-    GOG_VERSION_REMOVAL_REGEX = re.compile('GOG[0-9]{0,5}$')
-    
-    detected_discrepancies = {'windows': [], 'osx': []}
-    
-    try:
-        with sqlite3.connect(db_file_path) as db_connection:
-            #select all existing ids from the gog_builds table (with valid builds) that are also present in the gog_products table
-            db_cursor = db_connection.execute('SELECT gb_int_id, gb_int_os, gb_int_title, gb_main_version_names FROM gog_builds '
-                                              'WHERE gb_main_version_names IS NOT NULL AND '
-                                              'gb_int_id IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
-            delta_list = db_cursor.fetchall()
-            logger.debug('Retrieved all applicable product ids from the DB...')
-                 
-            for delta_entry in delta_list:
-                current_product_id = delta_entry[0]
-                current_os = delta_entry[1]
-                #'osx' compatible products have installer os field listings of 'mac', not 'osx'
-                current_os_files = 'mac' if current_os == 'osx' else current_os
-                logger.debug(f'Now processing id {current_product_id}, {current_os}...')
-                
-                current_product_title = delta_entry[2]
-                
-                current_main_version_names = delta_entry[3].split(MVF_VALUE_SEPARATOR)
-                logger.debug(f'Current builds main version names are: {current_main_version_names}.')
-
-                #restricing languages to 'en' only will solve a lot of version discrepancy problems, 
-                #as some installers get misversioned non-english languages added at later points in time, 
-                #however the following titles will no longer be tracked because of this 
-                #(mentioning them here for future reference):
-                #
-                #Kajko i Kokosz    1720224179    pl
-                #Wolfenstein II: The New Colossus German Edition    1285433790    de
-                #Anstoss 2 Gold Edition    1808817480    de
-                #ANSTOSS 3: Der Fußballmanager    1886141726    de
-                #
-                db_cursor = db_connection.execute('SELECT DISTINCT gf_version FROM gog_files WHERE gf_int_id = ? AND gf_int_removed IS NULL '
-                                                  'AND gf_language = \'en\' AND gf_int_download_type = \'installer\' AND gf_os = ? '
-                                                  'AND gf_version IS NOT NULL ORDER BY gf_int_added DESC LIMIT 1', 
-                                                  (current_product_id, current_os_files))
-                latest_version = db_cursor.fetchone()
-                
-                if latest_version is not None:
-                    current_latest_build_version_orig = current_main_version_names[0].strip()
-                    logger.debug(f'Current latest main build version is: {current_latest_build_version_orig}.')
-                    current_latest_file_version_orig = latest_version[0].strip()
-                    logger.debug(f'Current latest file version is: {current_latest_file_version_orig}.')
-                    
-                    excluded = False
-                    
-                    #convert to uppercase for comparisons
-                    current_latest_build_version = current_latest_build_version_orig.upper()
-                    current_latest_file_version = current_latest_file_version_orig.upper()
-                                        
-                    #remove any (A) identifiers from builds/installers
-                    current_latest_build_version = current_latest_build_version.replace('(A)', '')
-                    current_latest_file_version = current_latest_file_version.replace('(A)', '')
-                    
-                    #remove any 'GALAXY HOTFIX' and 'GOG HOTFIX' strings from build versions
-                    current_latest_build_version = current_latest_build_version.replace('GALAXY HOTFIX', '')
-                    current_latest_build_version = current_latest_build_version.replace('GOG HOTFIX', '')
-
-                    #remove punctuation/formatting/grouping characters
-                    for stripped_item in STRIP_OUT_LIST:
-                        current_latest_build_version = current_latest_build_version.replace(stripped_item, '')
-                        current_latest_file_version = current_latest_file_version.replace(stripped_item, '')
-                        
-                    #strip any version/build set that starts with the letter 'V'
-                    if current_latest_build_version.startswith('V') and current_latest_file_version.startswith('V'):
-                        current_latest_build_version = current_latest_build_version[1:]
-                        current_latest_file_version = current_latest_file_version[1:]
-                        
-                    #strip any version/build set that ends with the letter 'A'
-                    if current_latest_build_version.endswith('A') and current_latest_file_version.endswith('A'):
-                        current_latest_build_version = current_latest_build_version[:-1]
-                        current_latest_file_version = current_latest_file_version[:-1]
-                    
-                    #remove RCX strings
-                    current_latest_build_version = GOG_RC_REMOVAL_REGEX.sub('', current_latest_build_version)
-                    logger.debug(f'Post RCX comparison build version is: {current_latest_build_version}.')
-                    current_latest_file_version = GOG_RC_REMOVAL_REGEX.sub('', current_latest_file_version)
-                    logger.debug(f'Post RCX comparison file version is: {current_latest_file_version}.')
-                    
-                    #remove (GOG-X) strings
-                    current_latest_build_version = GOG_VERSION_REMOVAL_REGEX.sub('', current_latest_build_version)
-                    logger.debug(f'Post GOG-X comparison build version is: {current_latest_build_version}.')
-                    current_latest_file_version = GOG_VERSION_REMOVAL_REGEX.sub('', current_latest_file_version)
-                    logger.debug(f'Post GOG-X comparison file version is: {current_latest_file_version}.')
-                    
-                    #exclude any blank entries (blanked after previous filtering)
-                    #as well as some weird corner-case matches due to GOG's versioning madness
-                    if current_latest_file_version == '' or current_latest_build_version == '':
-                        excluded = True
-                    elif current_latest_build_version[0] == 'V' and current_latest_build_version[1:] == current_latest_file_version:
-                        excluded = True
-                    elif current_latest_build_version[-1] == 'A' and current_latest_build_version[:-1] == current_latest_file_version:
-                        excluded = True
-                    elif current_latest_build_version[-1] == 'G' and current_latest_build_version[:-1] == current_latest_file_version:
-                        excluded = True
-                    elif current_latest_file_version[0] == 'V' and current_latest_file_version[1:] == current_latest_build_version:
-                        excluded = True
-                    elif current_latest_file_version[-1] == 'A' and current_latest_file_version[:-1] == current_latest_build_version:
-                        excluded = True
-                        
-                    if not excluded and current_latest_file_version != current_latest_build_version:
-                        #add detected discrepancy to its os list
-                        detected_discrepancies[current_os].append(current_product_id)
-                        #use MAX on gid_int_false_positive, although there should only ever be one entry
-                        db_cursor.execute('SELECT COUNT(*), MAX(gid_int_false_positive) FROM gog_installers_delta WHERE gid_int_id = ? '
-                                          'AND gid_int_os = ? AND gid_int_fixed IS NULL', (current_product_id, current_os))
-                        installer_delta_entry_count, current_false_positive = db_cursor.fetchone()
-                        
-                        #false positive status should be set to False for new entries
-                        current_false_positive = False if current_false_positive is None else current_false_positive
-                        
-                        if installer_delta_entry_count != 0:
-                            db_cursor.execute('SELECT COUNT(*) FROM gog_installers_delta WHERE gid_int_id = ? AND gid_int_os = ? '
-                                              'AND gid_int_latest_galaxy_build = ? AND gid_int_latest_installer_version = ? AND gid_int_fixed IS NULL', 
-                                              (current_product_id, current_os, current_latest_build_version_orig, current_latest_file_version_orig))
-                            installer_version_delta_entry_count = db_cursor.fetchone()[0]
-                            
-                            if installer_version_delta_entry_count != 0:
-                                logger.debug(f'Discrepancy already logged for {current_product_id}: {current_product_title}, {current_os}. Skipping.')
-                            else:
-                                logger.debug(f'Found outdated discrepancy for {current_product_id}: {current_product_title}, {current_os}.')
+                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                            sleep(sleep_interval)
                                 
-                                if current_false_positive:
-                                    #any updates to a discrepancy should reset the false positive state of an entry
-                                    current_false_positive = False
-                                    logger.warning(f'False positive status has been reset for {current_product_id}, {current_os}.')
+                        complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
+                        
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
                                 
-                                db_cursor.execute('UPDATE gog_installers_delta SET gid_int_latest_galaxy_build = ?, gid_int_latest_installer_version = ?, '
-                                                  'gid_int_false_positive = ? WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
-                                                  (current_latest_build_version_orig, current_latest_file_version_orig, 
-                                                   current_false_positive, current_product_id, current_os))
-                                db_connection.commit()
-                                logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os}.')
+                            last_id_counter += 1
+    
                         else:
-                            logger.debug(f'Found new discrepancy for {current_product_id}: {current_product_title}, {current_os}.')
-                            #gid_int_nr, gid_int_added, gid_int_fixed, gid_int_id, gid_int_title, 
-                            #gid_int_os, gid_int_latest_galaxy_build, gid_int_latest_installer_version
-                            #gid_int_false_positive, gid_int_false_positive_reason
-                            db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now(), None, current_product_id, current_product_title, 
-                                                                              current_os, current_latest_build_version_orig, current_latest_file_version_orig, 
-                                                                              current_false_positive, None))
-                            db_connection.commit()
-                            logger.info(f'+++ Successfully added an entry for {current_product_id}: {current_product_title}, {current_os}.')
-                
-                else:
-                    logger.debug(f'Product with id {current_product_id} is on the exclusion list. Skipping.')
-            
-            #verify if previosly logged discrepancies have been fixed
-            db_cursor.execute('SELECT DISTINCT gid_int_id, gid_int_title, gid_int_os FROM gog_installers_delta WHERE gid_int_fixed IS NULL ORDER BY 1')
-            discrepancy_list = db_cursor.fetchall()
-            
-            for discrepancy in discrepancy_list:
-                current_product_id = discrepancy[0]
-                current_product_title = discrepancy[1]
-                current_os = discrepancy[2]
-                
-                if current_product_id not in detected_discrepancies[current_os]:
-                    logger.debug(f'Discrepancy for {current_product_id}: {current_product_title}, {current_os} has been fixed.')
-                    #also clear any existing manually set reason if a false positive entry is marked as resolved
-                    db_cursor.execute('UPDATE gog_installers_delta SET gid_int_fixed = ?, gid_int_false_positive = 0, gid_int_false_positive_reason = NULL '
-                                      'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
-                                      (datetime.now(), current_product_id, current_os))
-                    db_connection.commit()
-                    logger.info(f'--- Successfully updated fixed status for {current_product_id}: {current_product_title}, {current_os}.')
-                
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
-            
-    except KeyboardInterrupt:
-        terminate_signal = True
-        
-elif scan_mode == 'removed':
-    logger.info('--- Running in REMOVED scan mode ---')
-    
-    try:
-        logger.info('Starting scan on all removed DB entries...')
-        
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            #select all builds which are removed
-            db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_removed IS NOT NULL ORDER BY 1')
-            id_list = db_cursor.fetchall()
-            logger.debug('Retrieved all removed build ids from the DB...')
-            
-            for id_entry in id_list:
-                current_product_id = id_entry[0]
-                logger.info(f'Running scan for id {current_product_id}...')
-                complete_windows = False
-                complete_osx = False
-                retry_counter = 0
-                
-                while not (complete_windows and complete_osx) and not terminate_signal:
-                    if retry_counter > 0:
-                        logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                        sleep(RETRY_SLEEP_INTERVAL)
-                        logger.warning(f'Reprocessing id {current_product_id}...')
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+                            
+                    if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_event.is_set():
+                        configParser.read(conf_file_path)
+                        configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
-                    complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
-                    #try other oses as well, if the 'windows' scan goes well
-                    if complete_windows:
-                        complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
+                        with open(conf_file_path, 'w') as file:
+                            configParser.write(file)
+                            
+                        logger.info(f'Saved scan up to last_id of {current_product_id}.')
                     
-                    if complete_windows and complete_osx:
-                        if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {current_product_id}.')
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+                        
+        except KeyboardInterrupt:
+            terminate_event.set()
         
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
+    elif scan_mode == 'products':
+        logger.info('--- Running in PRODUCTS scan mode ---')
+        
+        #blank the filter for a really thorough scan, although it usually doesn't make sense (but not always,
+        #since some 'pack' and 'dlc' entries do have builds linked to them... hopefully just GOGBears tripping)
+        #GAME_TYPE_FILTER = ''
+        #filtering by game_type will drastically reduce the number of scanned ids
+        GAME_TYPE_FILTER = ' AND gp_game_type = \'game\''
+        
+        try:
+            logger.info('Starting builds scan (based on products) on all applicable DB entries...')
             
-    except KeyboardInterrupt:
-        terminate_signal = True
-    
-if not terminate_signal and scan_mode == 'update':
-    logger.info('Resetting last_id parameter...')
-    configParser.read(conf_file_path)
-    configParser['UPDATE_SCAN']['last_id'] = ''
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                #select all existing ids from the gog_products table which are not already present in the 
+                #gog_builds table and atempt to scan them from matching builds API entries
+                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
+                                                  f'(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1)'
+                                                  f'{GAME_TYPE_FILTER} ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all applicable product ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    complete_windows = False
+                    complete_osx = False
+                    retry_counter = 0
                     
-    with open(conf_file_path, 'w') as file:
-        configParser.write(file)
+                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                            sleep(sleep_interval)
+                            
+                        complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
+                        
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+            
+        except KeyboardInterrupt:
+            terminate_event.set()
         
-logger.info('All done! Exiting...')
-
-##main thread end
+    elif scan_mode == 'manual':
+        logger.info('--- Running in MANUAL scan mode ---')
+        
+        manual_scan_section = configParser['MANUAL_SCAN']
+        #load the product id list to process
+        id_list = manual_scan_section.get('id_list')
+        try:
+            id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
+        except ValueError:
+            logger.critical('Could not parse id list!')
+            raise SystemExit(4)
+        
+        try:
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                for product_id in id_list:
+                    logger.info(f'Running scan for id {product_id}...')
+                    complete_windows = False
+                    complete_osx = False
+                    retry_counter = 0
+                    
+                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {product_id}...')
+                            
+                        complete_windows = gog_builds_query(product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(product_id, 'osx', scan_mode, session, db_connection)
+                        
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+            
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+                
+        except KeyboardInterrupt:
+            terminate_event.set()
+        
+    elif scan_mode == 'delta':
+        logger.info('--- Running in DELTA scan mode ---')
+        
+        #strip any punctuation or other grouping characters from builds/versions
+        STRIP_OUT_LIST = [' ', ',', '.', '-', '_', '[', ']', '(', ')', '{', '}', '/', '\\']
+        #static regex pattern for removing end-of-string RC identifier from builds/installers
+        GOG_RC_REMOVAL_REGEX = re.compile('RC[0-9]{1}$')
+        #static regex pattern for removing end-of-string GOG version strings from builds/installers
+        GOG_VERSION_REMOVAL_REGEX = re.compile('GOG[0-9]{0,5}$')
+        
+        detected_discrepancies = {'windows': [], 'osx': []}
+        
+        try:
+            with sqlite3.connect(db_file_path) as db_connection:
+                #select all existing ids from the gog_builds table (with valid builds) that are also present in the gog_products table
+                db_cursor = db_connection.execute('SELECT gb_int_id, gb_int_os, gb_int_title, gb_main_version_names FROM gog_builds '
+                                                  'WHERE gb_main_version_names IS NOT NULL AND '
+                                                  'gb_int_id IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
+                delta_list = db_cursor.fetchall()
+                logger.debug('Retrieved all applicable product ids from the DB...')
+                     
+                for delta_entry in delta_list:
+                    current_product_id = delta_entry[0]
+                    current_os = delta_entry[1]
+                    #'osx' compatible products have installer os field listings of 'mac', not 'osx'
+                    current_os_files = 'mac' if current_os == 'osx' else current_os
+                    logger.debug(f'Now processing id {current_product_id}, {current_os}...')
+                    
+                    current_product_title = delta_entry[2]
+                    
+                    current_main_version_names = delta_entry[3].split(MVF_VALUE_SEPARATOR)
+                    logger.debug(f'Current builds main version names are: {current_main_version_names}.')
+    
+                    #restricing languages to 'en' only will solve a lot of version discrepancy problems, 
+                    #as some installers get misversioned non-english languages added at later points in time, 
+                    #however the following titles will no longer be tracked because of this 
+                    #(mentioning them here for future reference):
+                    #
+                    #Kajko i Kokosz    1720224179    pl
+                    #Wolfenstein II: The New Colossus German Edition    1285433790    de
+                    #Anstoss 2 Gold Edition    1808817480    de
+                    #ANSTOSS 3: Der Fußballmanager    1886141726    de
+                    #
+                    db_cursor = db_connection.execute('SELECT DISTINCT gf_version FROM gog_files WHERE gf_int_id = ? AND gf_int_removed IS NULL '
+                                                      'AND gf_language = \'en\' AND gf_int_download_type = \'installer\' AND gf_os = ? '
+                                                      'AND gf_version IS NOT NULL ORDER BY gf_int_added DESC LIMIT 1', 
+                                                      (current_product_id, current_os_files))
+                    latest_version = db_cursor.fetchone()
+                    
+                    if latest_version is not None:
+                        current_latest_build_version_orig = current_main_version_names[0].strip()
+                        logger.debug(f'Current latest main build version is: {current_latest_build_version_orig}.')
+                        current_latest_file_version_orig = latest_version[0].strip()
+                        logger.debug(f'Current latest file version is: {current_latest_file_version_orig}.')
+                        
+                        excluded = False
+                        
+                        #convert to uppercase for comparisons
+                        current_latest_build_version = current_latest_build_version_orig.upper()
+                        current_latest_file_version = current_latest_file_version_orig.upper()
+                                            
+                        #remove any (A) identifiers from builds/installers
+                        current_latest_build_version = current_latest_build_version.replace('(A)', '')
+                        current_latest_file_version = current_latest_file_version.replace('(A)', '')
+                        
+                        #remove any 'GALAXY HOTFIX' and 'GOG HOTFIX' strings from build versions
+                        current_latest_build_version = current_latest_build_version.replace('GALAXY HOTFIX', '')
+                        current_latest_build_version = current_latest_build_version.replace('GOG HOTFIX', '')
+    
+                        #remove punctuation/formatting/grouping characters
+                        for stripped_item in STRIP_OUT_LIST:
+                            current_latest_build_version = current_latest_build_version.replace(stripped_item, '')
+                            current_latest_file_version = current_latest_file_version.replace(stripped_item, '')
+                            
+                        #strip any version/build set that starts with the letter 'V'
+                        if current_latest_build_version.startswith('V') and current_latest_file_version.startswith('V'):
+                            current_latest_build_version = current_latest_build_version[1:]
+                            current_latest_file_version = current_latest_file_version[1:]
+                            
+                        #strip any version/build set that ends with the letter 'A'
+                        if current_latest_build_version.endswith('A') and current_latest_file_version.endswith('A'):
+                            current_latest_build_version = current_latest_build_version[:-1]
+                            current_latest_file_version = current_latest_file_version[:-1]
+                        
+                        #remove RCX strings
+                        current_latest_build_version = GOG_RC_REMOVAL_REGEX.sub('', current_latest_build_version)
+                        logger.debug(f'Post RCX comparison build version is: {current_latest_build_version}.')
+                        current_latest_file_version = GOG_RC_REMOVAL_REGEX.sub('', current_latest_file_version)
+                        logger.debug(f'Post RCX comparison file version is: {current_latest_file_version}.')
+                        
+                        #remove (GOG-X) strings
+                        current_latest_build_version = GOG_VERSION_REMOVAL_REGEX.sub('', current_latest_build_version)
+                        logger.debug(f'Post GOG-X comparison build version is: {current_latest_build_version}.')
+                        current_latest_file_version = GOG_VERSION_REMOVAL_REGEX.sub('', current_latest_file_version)
+                        logger.debug(f'Post GOG-X comparison file version is: {current_latest_file_version}.')
+                        
+                        #exclude any blank entries (blanked after previous filtering)
+                        #as well as some weird corner-case matches due to GOG's versioning madness
+                        if current_latest_file_version == '' or current_latest_build_version == '':
+                            excluded = True
+                        elif current_latest_build_version[0] == 'V' and current_latest_build_version[1:] == current_latest_file_version:
+                            excluded = True
+                        elif current_latest_build_version[-1] == 'A' and current_latest_build_version[:-1] == current_latest_file_version:
+                            excluded = True
+                        elif current_latest_build_version[-1] == 'G' and current_latest_build_version[:-1] == current_latest_file_version:
+                            excluded = True
+                        elif current_latest_file_version[0] == 'V' and current_latest_file_version[1:] == current_latest_build_version:
+                            excluded = True
+                        elif current_latest_file_version[-1] == 'A' and current_latest_file_version[:-1] == current_latest_build_version:
+                            excluded = True
+                            
+                        if not excluded and current_latest_file_version != current_latest_build_version:
+                            #add detected discrepancy to its os list
+                            detected_discrepancies[current_os].append(current_product_id)
+                            #use MAX on gid_int_false_positive, although there should only ever be one entry
+                            db_cursor.execute('SELECT COUNT(*), MAX(gid_int_false_positive) FROM gog_installers_delta WHERE gid_int_id = ? '
+                                              'AND gid_int_os = ? AND gid_int_fixed IS NULL', (current_product_id, current_os))
+                            installer_delta_entry_count, current_false_positive = db_cursor.fetchone()
+                            
+                            #false positive status should be set to False for new entries
+                            current_false_positive = False if current_false_positive is None else current_false_positive
+                            
+                            if installer_delta_entry_count != 0:
+                                db_cursor.execute('SELECT COUNT(*) FROM gog_installers_delta WHERE gid_int_id = ? AND gid_int_os = ? '
+                                                  'AND gid_int_latest_galaxy_build = ? AND gid_int_latest_installer_version = ? AND gid_int_fixed IS NULL', 
+                                                  (current_product_id, current_os, current_latest_build_version_orig, current_latest_file_version_orig))
+                                installer_version_delta_entry_count = db_cursor.fetchone()[0]
+                                
+                                if installer_version_delta_entry_count != 0:
+                                    logger.debug(f'Discrepancy already logged for {current_product_id}: {current_product_title}, {current_os}. Skipping.')
+                                else:
+                                    logger.debug(f'Found outdated discrepancy for {current_product_id}: {current_product_title}, {current_os}.')
+                                    
+                                    if current_false_positive:
+                                        #any updates to a discrepancy should reset the false positive state of an entry
+                                        current_false_positive = False
+                                        logger.warning(f'False positive status has been reset for {current_product_id}, {current_os}.')
+                                    
+                                    db_cursor.execute('UPDATE gog_installers_delta SET gid_int_latest_galaxy_build = ?, gid_int_latest_installer_version = ?, '
+                                                      'gid_int_false_positive = ? WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
+                                                      (current_latest_build_version_orig, current_latest_file_version_orig, 
+                                                       current_false_positive, current_product_id, current_os))
+                                    db_connection.commit()
+                                    logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os}.')
+                            else:
+                                logger.debug(f'Found new discrepancy for {current_product_id}: {current_product_title}, {current_os}.')
+                                #gid_int_nr, gid_int_added, gid_int_fixed, gid_int_id, gid_int_title, 
+                                #gid_int_os, gid_int_latest_galaxy_build, gid_int_latest_installer_version
+                                #gid_int_false_positive, gid_int_false_positive_reason
+                                db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now(), None, current_product_id, current_product_title, 
+                                                                                  current_os, current_latest_build_version_orig, current_latest_file_version_orig, 
+                                                                                  current_false_positive, None))
+                                db_connection.commit()
+                                logger.info(f'+++ Successfully added an entry for {current_product_id}: {current_product_title}, {current_os}.')
+                    
+                    else:
+                        logger.debug(f'Product with id {current_product_id} is on the exclusion list. Skipping.')
+                
+                #verify if previosly logged discrepancies have been fixed
+                db_cursor.execute('SELECT DISTINCT gid_int_id, gid_int_title, gid_int_os FROM gog_installers_delta WHERE gid_int_fixed IS NULL ORDER BY 1')
+                discrepancy_list = db_cursor.fetchall()
+                
+                for discrepancy in discrepancy_list:
+                    current_product_id = discrepancy[0]
+                    current_product_title = discrepancy[1]
+                    current_os = discrepancy[2]
+                    
+                    if current_product_id not in detected_discrepancies[current_os]:
+                        logger.debug(f'Discrepancy for {current_product_id}: {current_product_title}, {current_os} has been fixed.')
+                        #also clear any existing manually set reason if a false positive entry is marked as resolved
+                        db_cursor.execute('UPDATE gog_installers_delta SET gid_int_fixed = ?, gid_int_false_positive = 0, gid_int_false_positive_reason = NULL '
+                                          'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
+                                          (datetime.now(), current_product_id, current_os))
+                        db_connection.commit()
+                        logger.info(f'--- Successfully updated fixed status for {current_product_id}: {current_product_title}, {current_os}.')
+                    
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+                
+        except KeyboardInterrupt:
+            terminate_event.set()
+            
+    elif scan_mode == 'removed':
+        logger.info('--- Running in REMOVED scan mode ---')
+        
+        try:
+            logger.info('Starting scan on all removed DB entries...')
+            
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                #select all builds which are removed
+                db_cursor = db_connection.execute('SELECT DISTINCT gb_int_id FROM gog_builds WHERE gb_int_removed IS NOT NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all removed build ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.info(f'Running scan for id {current_product_id}...')
+                    complete_windows = False
+                    complete_osx = False
+                    retry_counter = 0
+                    
+                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
+                            
+                        complete_windows = gog_builds_query(current_product_id, 'windows', scan_mode, session, db_connection)
+                        #try other oses as well, if the 'windows' scan goes well
+                        if complete_windows:
+                            complete_osx = gog_builds_query(current_product_id, 'osx', scan_mode, session, db_connection)
+                        
+                        if complete_windows and complete_osx:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+            
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+                
+        except KeyboardInterrupt:
+            terminate_event.set()
+        
+    if not terminate_event.is_set() and scan_mode == 'update':
+        logger.info('Resetting last_id parameter...')
+        configParser.read(conf_file_path)
+        configParser['UPDATE_SCAN']['last_id'] = ''
+                        
+        with open(conf_file_path, 'w') as file:
+            configParser.write(file)
+            
+    logger.info('All done! Exiting...')

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.25
-@date: 28/09/2022
+@version: 3.40
+@date: 06/11/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -25,16 +25,12 @@ from matplotlib.ticker import ScalarFormatter
 file_date = datetime.now().strftime('%Y%m%d')
 
 ##logging configuration block
-log_file_path = os.path.join('..', 'logs', 'gog_plot_gen.log')
-logger_file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
 logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 #logging level for current logger
 logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
-logger.addHandler(logger_file_handler)
 
 ##db configuration block
 db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
@@ -221,72 +217,68 @@ def plot_id_distribution(mode, db_connection):
     #uncomment for debugging purposes only
     #pyplot.show()
 
-##main thread start
-
-#added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description=('GOG plot generation (part of gog_gles) - a script to generate GOG-related '
-                                              'statistics and charts.'))
-
-group = parser.add_mutually_exclusive_group()
-group.add_argument('-t', '--timeline', help='Generate id detection timeline chart', action='store_true')
-group.add_argument('-d', '--distribution', help='Generate the id distribution chart (all ids)', action='store_true')
-group.add_argument('-i', '--incremental', help='Generate the id distribution chart (incremental ids)', action='store_true')
-
-parser.add_argument('-c', '--colors', help='Pick a color theme between: default, sunset, fire, darkness')
-
-args = parser.parse_args()
-
-logger.info('*** Running PLOT GENERATION script ***')
-
-CHART_COLORS = DEFAULT_CHART_COLORS
-#select a default plot mode if no command line switch is specified
-plot_mode = 'timeline'
-
-#detect any parameter overrides and set the scan_mode accordingly
-if len(argv) > 1:
-    logger.info('Command-line parameter mode override detected.')
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description=('GOG plot generation (part of gog_gles) - a script to generate GOG-related '
+                                                  'statistics and charts.'))
     
-    if args.timeline:
-        plot_mode = 'timeline'
-    elif args.distribution:
-        plot_mode = 'distribution'
-    elif args.incremental:
-        plot_mode = 'incremental'
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-t', '--timeline', help='Generate id detection timeline chart', action='store_true')
+    group.add_argument('-d', '--distribution', help='Generate the id distribution chart (all ids)', action='store_true')
+    group.add_argument('-i', '--incremental', help='Generate the id distribution chart (incremental ids)', action='store_true')
+    
+    parser.add_argument('-c', '--colors', help='Pick a color theme between: default, sunset, fire, darkness')
+    
+    args = parser.parse_args()
+    
+    logger.info('*** Running PLOT GENERATION script ***')
+    
+    CHART_COLORS = DEFAULT_CHART_COLORS
+    #select a default plot mode if no command line switch is specified
+    plot_mode = 'timeline'
+    
+    #detect any parameter overrides and set the scan_mode accordingly
+    if len(argv) > 1:
+        logger.info('Command-line parameter mode override detected.')
         
-    if args.colors == 'sunset':
-        CHART_COLORS = SUNSET_CHART_COLORS
-    elif args.colors == 'fire':
-        CHART_COLORS = FIRE_CHART_COLORS
-    elif args.colors == 'darkness':
-        CHART_COLORS = DARKNESS_CHART_COLORS
-
-if plot_mode == 'timeline':
-    logger.info('--- Running in ID TIMELINE mode ---')
+        if args.timeline:
+            plot_mode = 'timeline'
+        elif args.distribution:
+            plot_mode = 'distribution'
+        elif args.incremental:
+            plot_mode = 'incremental'
+            
+        if args.colors == 'sunset':
+            CHART_COLORS = SUNSET_CHART_COLORS
+        elif args.colors == 'fire':
+            CHART_COLORS = FIRE_CHART_COLORS
+        elif args.colors == 'darkness':
+            CHART_COLORS = DARKNESS_CHART_COLORS
     
-    with sqlite3.connect(db_file_path) as db_connection:
-        plot_id_timeline(plot_mode, db_connection)
+    if plot_mode == 'timeline':
+        logger.info('--- Running in ID TIMELINE mode ---')
         
-        logger.debug('Running PRAGMA optimize...')
-        db_connection.execute(OPTIMIZE_QUERY)
-    
-elif plot_mode == 'distribution':
-    logger.info('--- Running in ID DISTRIBUTION mode (all) ---')
-    
-    with sqlite3.connect(db_file_path) as db_connection:
-        plot_id_distribution(plot_mode, db_connection)
+        with sqlite3.connect(db_file_path) as db_connection:
+            plot_id_timeline(plot_mode, db_connection)
+            
+            logger.debug('Running PRAGMA optimize...')
+            db_connection.execute(OPTIMIZE_QUERY)
         
-        logger.debug('Running PRAGMA optimize...')
-        db_connection.execute(OPTIMIZE_QUERY)
-    
-elif plot_mode == 'incremental':
-    logger.info('--- Running in ID DISTRIBUTION mode (incremental) ---')
-    
-    with sqlite3.connect(db_file_path) as db_connection:
-        plot_id_distribution(plot_mode, db_connection)
+    elif plot_mode == 'distribution':
+        logger.info('--- Running in ID DISTRIBUTION mode (all) ---')
         
-        logger.debug('Running PRAGMA optimize...')
-        db_connection.execute(OPTIMIZE_QUERY)
-
-logger.info('All done! Exiting...')
-
-##main thread end
+        with sqlite3.connect(db_file_path) as db_connection:
+            plot_id_distribution(plot_mode, db_connection)
+            
+            logger.debug('Running PRAGMA optimize...')
+            db_connection.execute(OPTIMIZE_QUERY)
+        
+    elif plot_mode == 'incremental':
+        logger.info('--- Running in ID DISTRIBUTION mode (incremental) ---')
+        
+        with sqlite3.connect(db_file_path) as db_connection:
+            plot_id_distribution(plot_mode, db_connection)
+            
+            logger.debug('Running PRAGMA optimize...')
+            db_connection.execute(OPTIMIZE_QUERY)
+    
+    logger.info('All done! Exiting...')

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.25
-@date: 28/09/2022
+@version: 3.40
+@date: 06/11/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -31,14 +31,16 @@ from logging.handlers import RotatingFileHandler
 configParser = ConfigParser()
 db_lock = threading.Lock()
 config_lock = threading.Lock()
-terminate_signal = False
+##shared thread events
+terminate_event = threading.Event()
+terminate_event.clear()
 
 ##conf file block
 conf_file_path = os.path.join('..', 'conf', 'gog_releases_scan.conf')
 
 ##logging configuration block
 log_file_path = os.path.join('..', 'logs', 'gog_releases_scan.log')
-logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=8388608, backupCount=1, encoding='utf-8')
+logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=25165824, backupCount=1, encoding='utf-8')
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
 logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
@@ -213,23 +215,21 @@ def gog_releases_query(release_id, scan_mode, session, db_connection):
         
         return False
     
-def worker_thread(thread_number, scan_mode):
-    global terminate_signal
-    
+def worker_thread(thread_number, scan_mode, terminate_event):
     queue_empty = False
     threadConfigParser = ConfigParser()
         
     with requests.Session() as threadSession, sqlite3.connect(db_file_path) as thread_db_connection:
         logger.info(f'Starting thread T#{thread_number}...')
         
-        while not queue_empty and not terminate_signal:
+        while not queue_empty and not terminate_event.is_set():
             try:
                 product_id = queue.get(True, QUEUE_WAIT_TIMEOUT)
             
                 retry_counter = 0
                 retries_complete = False
                 
-                while not retries_complete and not terminate_signal:
+                while not retries_complete and not terminate_event.is_set():
                     if retry_counter > 0:
                         logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
                         #main iternation incremental sleep
@@ -245,11 +245,11 @@ def worker_thread(thread_number, scan_mode):
                         #terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
                             logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')    
-                            terminate_signal = True
+                            terminate_event.set()
                             #forcefully terminate script
                             terminate_script()
                     
-                if product_id % ID_SAVE_INTERVAL == 0 and not terminate_signal:
+                if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
                         threadConfigParser.read(conf_file_path)
                         threadConfigParser['FULL_SCAN']['start_id'] = str(product_id)
@@ -270,297 +270,295 @@ def worker_thread(thread_number, scan_mode):
         logger.debug('Running PRAGMA optimize...')
         thread_db_connection.execute(OPTIMIZE_QUERY)
             
-##main thread start
-
-#added support for optional command-line parameter mode switching
-parser = argparse.ArgumentParser(description=('GOG releases scan (part of gog_gles) - a script to call publicly available GOG APIs '
-                                              'in order to retrieve releases information and updates.'))
-
-group = parser.add_mutually_exclusive_group()
-group.add_argument('-u', '--update', help='Run an update scan for existing releases', action='store_true')
-group.add_argument('-f', '--full', help='Perform a full releases scan using the Galaxy external releases endpoint', action='store_true')
-group.add_argument('-p', '--products', help='Perform a products-based releases scan', action='store_true')
-group.add_argument('-m', '--manual', help='Perform a manual releases scan', action='store_true')
-
-args = parser.parse_args()
-
-logger.info('*** Running RELEASES scan script ***')
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description=('GOG releases scan (part of gog_gles) - a script to call publicly available GOG APIs '
+                                                  'in order to retrieve releases information and updates.'))
     
-try:
-    #reading from config file
-    configParser.read(conf_file_path)
-    general_section = configParser['GENERAL']
-    #parsing generic parameters
-    conf_backup = general_section.get('conf_backup')
-    db_backup = general_section.get('db_backup')
-    scan_mode = general_section.get('scan_mode')
-    #parsing constants
-    HTTP_TIMEOUT = general_section.getint('http_timeout')
-    RETRY_COUNT = general_section.getint('retry_count')
-    RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
-    RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
-except:
-    logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
-    raise SystemExit(1)
-
-#detect any parameter overrides and set the scan_mode accordingly
-if len(argv) > 1:
-    logger.info('Command-line parameter mode override detected.')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-u', '--update', help='Run an update scan for existing releases', action='store_true')
+    group.add_argument('-f', '--full', help='Perform a full releases scan using the Galaxy external releases endpoint', action='store_true')
+    group.add_argument('-p', '--products', help='Perform a products-based releases scan', action='store_true')
+    group.add_argument('-m', '--manual', help='Perform a manual releases scan', action='store_true')
     
-    if args.update:
-        scan_mode = 'update'
-    elif args.full:
-        scan_mode = 'full'
-    elif args.products:
-        scan_mode = 'products'
-    elif args.manual:
-        scan_mode = 'manual'
-
-#boolean 'true' or scan_mode specific activation
-if conf_backup == 'true' or conf_backup == scan_mode:
-    if os.path.exists(conf_file_path):
-        #create a backup of the existing conf file - mostly for debugging/recovery
-        copy2(conf_file_path, conf_file_path + '.bak')
-        logger.info('Successfully created conf file backup.')
-    else:
-        logger.critical('Could find specified conf file!')
-        raise SystemExit(2)
-
-#boolean 'true' or scan_mode specific activation
-if db_backup == 'true' or db_backup == scan_mode:
-    if os.path.exists(db_file_path):
-        #create a backup of the existing db - mostly for debugging/recovery
-        copy2(db_file_path, db_file_path + '.bak')
-        logger.info('Successfully created db backup.')
-    else:
-        #subprocess.run(['python', 'gog_create_db.py'])
-        logger.critical('Could find specified DB file!')
-        raise SystemExit(3)
+    args = parser.parse_args()
     
-if scan_mode == 'full':
-    logger.info('--- Running in FULL scan mode ---')
-    
-    #catch SIGTERM and exit gracefully
-    signal.signal(signal.SIGTERM, sigterm_handler)
-    
-    full_scan_section = configParser['FULL_SCAN']
-    ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
-    #number of active connection threads
-    CONNECTION_THREADS = full_scan_section.getint('connection_threads')
-    #stop_id = 2147483647, in order to scan the full range,
-    #stopping at the upper limit of a 32 bit signed integer type
-    stop_id = full_scan_section.getint('stop_id')
-    #product_id will restart from scan_id
-    product_id = full_scan_section.getint('start_id')
-    #reduce starting point by a batch to account for any thread overlap
-    if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
-    
-    logger.info(f'Restarting scan from id: {product_id}.')
-    
-    stop_id_reached = False
-    queue = Queue(CONNECTION_THREADS * 2)
-    thread_list = []
-    
+    logger.info('*** Running RELEASES scan script ***')
+        
     try:
-        for thread_no in range(CONNECTION_THREADS):
-            #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
-            THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
-            thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
-            #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
-            thread = threading.Thread(target=worker_thread, args=(thread_no_nice, scan_mode), daemon=True)
-            thread.start()
-            thread_list.append(thread)
+        #reading from config file
+        configParser.read(conf_file_path)
+        general_section = configParser['GENERAL']
+        #parsing generic parameters
+        conf_backup = general_section.get('conf_backup')
+        db_backup = general_section.get('db_backup')
+        scan_mode = general_section.get('scan_mode')
+        #parsing constants
+        HTTP_TIMEOUT = general_section.getint('http_timeout')
+        RETRY_COUNT = general_section.getint('retry_count')
+        RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
+        RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
+    except:
+        logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
+        raise SystemExit(1)
     
-        while not stop_id_reached and not terminate_signal:
-            logger.debug(f'Processing the following product_id: {product_id}.')
-            queue.put(product_id)
-            product_id += 1
-                
-            if product_id > stop_id:
-                logger.info(f'Stop id of {stop_id} reached. Halting processing...')
-                stop_id_reached = True
-                
-    except KeyboardInterrupt:
-        terminate_signal = True
+    #detect any parameter overrides and set the scan_mode accordingly
+    if len(argv) > 1:
+        logger.info('Command-line parameter mode override detected.')
         
-    finally:
-        logger.info('Waiting for the worker threads to complete...')
+        if args.update:
+            scan_mode = 'update'
+        elif args.full:
+            scan_mode = 'full'
+        elif args.products:
+            scan_mode = 'products'
+        elif args.manual:
+            scan_mode = 'manual'
+    
+    #boolean 'true' or scan_mode specific activation
+    if conf_backup == 'true' or conf_backup == scan_mode:
+        if os.path.exists(conf_file_path):
+            #create a backup of the existing conf file - mostly for debugging/recovery
+            copy2(conf_file_path, conf_file_path + '.bak')
+            logger.info('Successfully created conf file backup.')
+        else:
+            logger.critical('Could find specified conf file!')
+            raise SystemExit(2)
+    
+    #boolean 'true' or scan_mode specific activation
+    if db_backup == 'true' or db_backup == scan_mode:
+        if os.path.exists(db_file_path):
+            #create a backup of the existing db - mostly for debugging/recovery
+            copy2(db_file_path, db_file_path + '.bak')
+            logger.info('Successfully created db backup.')
+        else:
+            #subprocess.run(['python', 'gog_create_db.py'])
+            logger.critical('Could find specified DB file!')
+            raise SystemExit(3)
         
-        for thread in thread_list:
-            thread.join(THREAD_SYNC_TIMEOUT)
-            
-        logger.info('The worker threads have been stopped.')
-            
-elif scan_mode == 'update':
-    logger.info('--- Running in UPDATE scan mode ---')
-    
-    update_scan_section = configParser['UPDATE_SCAN']
-    
-    try:
-        last_id = update_scan_section.getint('last_id')
-    except ValueError:
-        last_id = 0
+    if scan_mode == 'full':
+        logger.info('--- Running in FULL scan mode ---')
         
-    ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
-    
-    if last_id > 0:
-        logger.info(f'Restarting update scan from id: {last_id}.')
-    
-    try:
-        logger.info('Starting update scan on all existing DB entries...')
+        #catch SIGTERM and exit gracefully
+        signal.signal(signal.SIGTERM, sigterm_handler)
         
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            #skip releases which are no longer listed
-            db_cursor = db_connection.execute('SELECT gr_external_id FROM gog_releases WHERE gr_external_id > ? '
-                                              'AND gr_int_delisted IS NULL ORDER BY 1', (last_id, ))
-            id_list = db_cursor.fetchall()
-            logger.debug('Retrieved all existing product ids from the DB...')
-            
-            #track the number of processed ids
-            last_id_counter = 0
-            
-            for id_entry in id_list:
-                current_product_id = id_entry[0]
-                logger.debug(f'Now processing id {current_product_id}...')
-                retries_complete = False
-                retry_counter = 0
-                
-                while not retries_complete and not terminate_signal:
-                    if retry_counter > 0:
-                        logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                        sleep(RETRY_SLEEP_INTERVAL)
-                        logger.warning(f'Reprocessing id {current_product_id}...')
-                        
-                    retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
+        full_scan_section = configParser['FULL_SCAN']
+        ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
+        #number of active connection threads
+        CONNECTION_THREADS = full_scan_section.getint('connection_threads')
+        #stop_id = 2147483647, in order to scan the full range,
+        #stopping at the upper limit of a 32 bit signed integer type
+        stop_id = full_scan_section.getint('stop_id')
+        #product_id will restart from scan_id
+        product_id = full_scan_section.getint('start_id')
+        #reduce starting point by a batch to account for any thread overlap
+        if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
+        
+        logger.info(f'Restarting scan from id: {product_id}.')
+        
+        stop_id_reached = False
+        queue = Queue(CONNECTION_THREADS * 2)
+        thread_list = []
+        
+        try:
+            for thread_no in range(CONNECTION_THREADS):
+                #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
+                THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
+                thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
+                #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
+                thread = threading.Thread(target=worker_thread, 
+                                          args=(thread_no_nice, scan_mode, terminate_event), 
+                                          daemon=True)
+                thread.start()
+                thread_list.append(thread)
+        
+            while not stop_id_reached and not terminate_event.is_set():
+                logger.debug(f'Processing the following product_id: {product_id}.')
+                queue.put(product_id)
+                product_id += 1
                     
-                    if retries_complete:
+                if product_id > stop_id:
+                    logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+                    stop_id_reached = True
+                    
+        except KeyboardInterrupt:
+            terminate_event.set()
+            
+        finally:
+            logger.info('Waiting for the worker threads to complete...')
+            
+            for thread in thread_list:
+                thread.join(THREAD_SYNC_TIMEOUT)
+                
+            logger.info('The worker threads have been stopped.')
+                
+    elif scan_mode == 'update':
+        logger.info('--- Running in UPDATE scan mode ---')
+        
+        update_scan_section = configParser['UPDATE_SCAN']
+        
+        try:
+            last_id = update_scan_section.getint('last_id')
+        except ValueError:
+            last_id = 0
+            
+        ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
+        
+        if last_id > 0:
+            logger.info(f'Restarting update scan from id: {last_id}.')
+        
+        try:
+            logger.info('Starting update scan on all existing DB entries...')
+            
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                #skip releases which are no longer listed
+                db_cursor = db_connection.execute('SELECT gr_external_id FROM gog_releases WHERE gr_external_id > ? '
+                                                  'AND gr_int_delisted IS NULL ORDER BY 1', (last_id, ))
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all existing product ids from the DB...')
+                
+                #track the number of processed ids
+                last_id_counter = 0
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_event.is_set():
                         if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {current_product_id}.')
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
+                            
+                        retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
                         
-                        last_id_counter += 1
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                            
+                            last_id_counter += 1
+                            
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+                            
+                    if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
+                        configParser.read(conf_file_path)
+                        configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-                        
-                if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
-                    configParser.read(conf_file_path)
-                    configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
-                    
-                    with open(conf_file_path, 'w') as file:
-                        configParser.write(file)
-                        
-                    logger.info(f'Saved scan up to last_id of {current_product_id}.')
-            
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
-            
-    except KeyboardInterrupt:
-        terminate_signal = True
-            
-elif scan_mode == 'products':
-    logger.info('--- Running in PRODUCTS scan mode ---')
-    
-    try:
-        logger.info('Starting releases scan (based on products) on all applicable DB entries...')
-        
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            #select all existing ids from the gog_products table which are not already present in the 
-            #gog_releases table and atempt to scan them from matching releases API entries
-            db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
-                                              '(SELECT gr_external_id FROM gog_releases ORDER BY 1) ORDER BY 1')
-            id_list = db_cursor.fetchall()
-            logger.debug('Retrieved all applicable product ids from the DB...')
-            
-            for id_entry in id_list:
-                current_product_id = id_entry[0]
-                logger.debug(f'Now processing id {current_product_id}...')
-                retries_complete = False
-                retry_counter = 0
+                        with open(conf_file_path, 'w') as file:
+                            configParser.write(file)
+                            
+                        logger.info(f'Saved scan up to last_id of {current_product_id}.')
                 
-                while not retries_complete and not terminate_signal:
-                    if retry_counter > 0:
-                        sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
-                        logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                        sleep(sleep_interval)
-                        
-                    retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
-                        
-                    if retries_complete:
-                        if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {current_product_id}.')
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
-            
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
-        
-    except KeyboardInterrupt:
-        terminate_signal = True
-    
-elif scan_mode == 'manual':
-    logger.info('--- Running in MANUAL scan mode ---')
-    
-    manual_scan_section = configParser['MANUAL_SCAN']
-    #load the product id list to process
-    try:
-        id_list = [int(product_id.strip()) for product_id in manual_scan_section.get('id_list').split(',')]
-    except ValueError:
-        logger.critical('Could not parse id list!')
-        raise SystemExit(4)
-    
-    try:
-        with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-            for product_id in id_list:
-                logger.info(f'Running scan for id {product_id}...')
-                retries_complete = False
-                retry_counter = 0
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
                 
-                while not retries_complete and not terminate_signal:
-                    if retry_counter > 0:
-                        logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                        sleep(RETRY_SLEEP_INTERVAL)
-                        logger.warning(f'Reprocessing id {current_product_id}...')
-                    
-                    retries_complete = gog_releases_query(product_id, scan_mode, session, db_connection)
-                        
-                    if retries_complete:
-                        if retry_counter > 0:
-                            logger.info(f'Succesfully retried for {product_id}.')
-                    else:
-                        retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical('Retry count exceeded, terminating scan!')
-                            terminate_signal = True
-                            #forcefully terminate script
-                            terminate_script()
+        except KeyboardInterrupt:
+            terminate_event.set()
+                
+    elif scan_mode == 'products':
+        logger.info('--- Running in PRODUCTS scan mode ---')
         
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
+        try:
+            logger.info('Starting releases scan (based on products) on all applicable DB entries...')
             
-    except KeyboardInterrupt:
-        terminate_signal = True
-    
-if not terminate_signal and scan_mode == 'update':
-    logger.info('Resetting last_id parameter...')
-    configParser.read(conf_file_path)
-    configParser['UPDATE_SCAN']['last_id'] = ''
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                #select all existing ids from the gog_products table which are not already present in the 
+                #gog_releases table and atempt to scan them from matching releases API entries
+                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
+                                                  '(SELECT gr_external_id FROM gog_releases ORDER BY 1) ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all applicable product ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
                     
-    with open(conf_file_path, 'w') as file:
-        configParser.write(file)
-
-logger.info('All done! Exiting...')
-
-##main thread end
+                    while not retries_complete and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                            sleep(sleep_interval)
+                            
+                        retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
+                            
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+            
+        except KeyboardInterrupt:
+            terminate_event.set()
+        
+    elif scan_mode == 'manual':
+        logger.info('--- Running in MANUAL scan mode ---')
+        
+        manual_scan_section = configParser['MANUAL_SCAN']
+        #load the product id list to process
+        try:
+            id_list = [int(product_id.strip()) for product_id in manual_scan_section.get('id_list').split(',')]
+        except ValueError:
+            logger.critical('Could not parse id list!')
+            raise SystemExit(4)
+        
+        try:
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                for product_id in id_list:
+                    logger.info(f'Running scan for id {product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
+                        
+                        retries_complete = gog_releases_query(product_id, scan_mode, session, db_connection)
+                            
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                                #forcefully terminate script
+                                terminate_script()
+            
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+                
+        except KeyboardInterrupt:
+            terminate_event.set()
+        
+    if not terminate_event.is_set() and scan_mode == 'update':
+        logger.info('Resetting last_id parameter...')
+        configParser.read(conf_file_path)
+        configParser['UPDATE_SCAN']['last_id'] = ''
+                        
+        with open(conf_file_path, 'w') as file:
+            configParser.write(file)
+    
+    logger.info('All done! Exiting...')
