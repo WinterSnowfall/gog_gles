@@ -8,7 +8,6 @@ Warning: Built for use with python 3.6+
 '''
 
 import sqlite3
-import signal
 import requests
 import logging
 import argparse
@@ -48,14 +47,6 @@ db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 INSERT_FORUM_QUERY = 'INSERT INTO gog_forums VALUES (?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
-
-def terminate_script():
-    logger.critical('Forcefully stopping script!')
-    
-    #flush buffers
-    os.sync()
-    #forcefully terminate script process
-    os.kill(os.getpid(), signal.SIGKILL)
         
 def gog_forums_query(session, db_connection):
     
@@ -212,8 +203,6 @@ if __name__=="__main__":
                     if retry_counter > RETRY_COUNT:
                         logger.critical('Retry count exceeded, terminating scan!')
                         terminate_signal = True
-                        #forcefully terminate script
-                        terminate_script()
                         
             logger.debug('Running PRAGMA optimize...')
             db_connection.execute(OPTIMIZE_QUERY)

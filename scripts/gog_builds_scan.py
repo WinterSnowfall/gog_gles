@@ -81,14 +81,6 @@ def sigterm_handler(signum, frame):
     logger.info('Stopping scan due to SIGTERM...')
     
     raise SystemExit(0)
-
-def terminate_script():
-    logger.critical('Forcefully stopping script!')
-    
-    #flush buffers
-    os.sync()
-    #forcefully terminate script process
-    os.kill(os.getpid(), signal.SIGKILL)
     
 def gog_builds_query(product_id, os, scan_mode, session, db_connection):
     
@@ -289,8 +281,6 @@ def worker_thread(thread_number, scan_mode, terminate_event):
                         if retry_counter > RETRY_COUNT:
                             logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process.')    
                             terminate_event.set()
-                            #forcefully terminate script
-                            terminate_script()
                     
                 #only do product_id processing on 'windows' build scans
                 if os == 'windows' and product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
@@ -502,8 +492,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                             
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_event.is_set():
                         configParser.read(conf_file_path)
@@ -568,8 +556,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -617,8 +603,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -847,8 +831,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)

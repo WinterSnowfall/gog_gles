@@ -9,7 +9,6 @@ Warning: Built for use with python 3.6+
 
 import json
 import sqlite3
-import signal
 import requests
 import logging
 import argparse
@@ -50,14 +49,6 @@ db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 INSERT_PRICES_QUERY = 'INSERT INTO gog_prices VALUES (?,?,?,?,?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
-
-def terminate_script():
-    logger.critical('Forcefully stopping script!')
-    
-    #flush buffers
-    os.sync()
-    #forcefully terminate script process
-    os.kill(os.getpid(), signal.SIGKILL)
     
 def gog_prices_query(product_id, product_title, country_code, currencies_list, session, db_connection):
     
@@ -275,8 +266,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
-                                #forcefully terminate script
-                                terminate_script()
                                 
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
                         configParser.read(conf_file_path)

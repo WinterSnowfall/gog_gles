@@ -117,14 +117,6 @@ def sigterm_handler(signum, frame):
     
     raise SystemExit(0)
 
-def terminate_script():
-    logger.critical('Forcefully stopping script!')
-    
-    #flush buffers
-    os.sync()
-    #forcefully terminate script process
-    os.kill(os.getpid(), signal.SIGKILL)
-
 #fallback path for movies, which scrapes the product page (regular ids will scrape developer/publisher info from the v2 call)
 def gog_product_company_query(product_id, session, db_connection, product_url):
     
@@ -919,8 +911,6 @@ def worker_thread(thread_number, scan_mode, terminate_event):
                         if retry_counter > RETRY_COUNT:
                             logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')
                             terminate_event.set()
-                            #forcefully terminate script
-                            terminate_script()
                     
                 if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
@@ -1136,8 +1126,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                             
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
                         configParser.read(conf_file_path)
@@ -1191,8 +1179,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                 
                 logger.info('Running scan for upcoming entries...')
                 page_no = 1
@@ -1226,8 +1212,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                     
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1270,8 +1254,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1313,8 +1295,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1381,8 +1361,6 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                                #forcefully terminate script
-                                terminate_script()
                             
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
