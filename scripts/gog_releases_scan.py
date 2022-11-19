@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.40
-@date: 06/11/2022
+@version: 3.42
+@date: 20/11/2022
 
 Warning: Built for use with python 3.6+
 '''
 
 import json
 import threading
+import queue
 import sqlite3
 import signal
 import requests
@@ -21,7 +22,6 @@ from shutil import copy2
 from configparser import ConfigParser
 from datetime import datetime
 from time import sleep
-from queue import Queue, Empty
 from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
 #uncomment for debugging purposes only
@@ -71,13 +71,13 @@ OPTIMIZE_QUERY = 'PRAGMA optimize'
 
 #value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
-#number of seconds a thread will wait to get an item from a queue
-QUEUE_WAIT_TIMEOUT = 5
-#thead sync timeout interval in seconds
-THREAD_SYNC_TIMEOUT = 20.0
+#number of seconds a thread will wait to get/put in a queue
+QUEUE_WAIT_TIMEOUT = 10
 
 def sigterm_handler(signum, frame):
     logger.info('Stopping scan due to SIGTERM...')
+    
+    terminate_event.set()
     
     raise SystemExit(0)
     
@@ -207,16 +207,15 @@ def gog_releases_query(release_id, scan_mode, session, db_connection):
         
         return False
     
-def worker_thread(thread_number, scan_mode, terminate_event):
-    queue_empty = False
+def worker_thread(thread_number, scan_mode, id_queue, terminate_event):
     threadConfigParser = ConfigParser()
         
     with requests.Session() as threadSession, sqlite3.connect(db_file_path) as thread_db_connection:
         logger.info(f'Starting thread T#{thread_number}...')
         
-        while not queue_empty and not terminate_event.is_set():
+        while not terminate_event.is_set():
             try:
-                product_id = queue.get(True, QUEUE_WAIT_TIMEOUT)
+                product_id = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
             
                 retry_counter = 0
                 retries_complete = False
@@ -248,12 +247,9 @@ def worker_thread(thread_number, scan_mode, terminate_event):
                             threadConfigParser.write(file)
                             
                         logger.info(f'T#{thread_number} >>> Processed up to id: {product_id}...')
-                
-                queue.task_done()
             
-            except Empty:
-                logger.debug(f'T#{thread_number} >>> Timed out while waiting for queue.')
-                queue_empty = True           
+            except queue.Empty:
+                logger.debug(f'T#{thread_number} >>> Timed out while waiting for queue.')         
             
         logger.info(f'Stopping thread T#{thread_number}...')
         
@@ -346,7 +342,7 @@ if __name__=="__main__":
         logger.info(f'Restarting scan from id: {product_id}.')
         
         stop_id_reached = False
-        queue = Queue(CONNECTION_THREADS * 2)
+        id_queue = queue.Queue(CONNECTION_THREADS * 2)
         thread_list = []
         
         try:
@@ -356,19 +352,25 @@ if __name__=="__main__":
                 thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
                 #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
                 thread = threading.Thread(target=worker_thread, 
-                                          args=(thread_no_nice, scan_mode, terminate_event), 
+                                          args=(thread_no_nice, scan_mode, 
+                                                id_queue, terminate_event), 
                                           daemon=True)
                 thread.start()
                 thread_list.append(thread)
         
             while not stop_id_reached and not terminate_event.is_set():
-                logger.debug(f'Processing the following product_id: {product_id}.')
-                queue.put(product_id)
-                product_id += 1
+                try:
+                    id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
                     
-                if product_id > stop_id:
-                    logger.info(f'Stop id of {stop_id} reached. Halting processing...')
-                    stop_id_reached = True
+                    logger.debug(f'Processing the following product_id: {product_id}.')
+                    product_id += 1
+                        
+                    if product_id > stop_id:
+                        logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+                        stop_id_reached = True
+                
+                except queue.Full:
+                    logger.debug('Timed out on queue insert.')
                     
         except KeyboardInterrupt:
             terminate_event.set()
@@ -377,7 +379,7 @@ if __name__=="__main__":
             logger.info('Waiting for the worker threads to complete...')
             
             for thread in thread_list:
-                thread.join(THREAD_SYNC_TIMEOUT)
+                thread.join()
                 
             logger.info('The worker threads have been stopped.')
                 

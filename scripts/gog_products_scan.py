@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.40
-@date: 06/11/2022
+@version: 3.42
+@date: 20/11/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -10,6 +10,7 @@ Warning: Built for use with python 3.6+
 import json
 import html
 import threading
+import queue
 import sqlite3
 import signal
 import requests
@@ -24,7 +25,6 @@ from configparser import ConfigParser
 from html2text import html2text
 from datetime import datetime
 from time import sleep
-from queue import Queue, Empty
 from collections import OrderedDict
 from lxml import html as lhtml
 from logging.handlers import RotatingFileHandler
@@ -103,10 +103,8 @@ ARCHIVE_NO_OF_RETRIES = 3
 ENDLINE_FIX_REGEX = re.compile('([ ]*[\n]){2,}')
 #value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
-#number of seconds a thread will wait to get an item from a queue
-QUEUE_WAIT_TIMEOUT = 5
-#thead sync timeout interval in seconds
-THREAD_SYNC_TIMEOUT = 20.0
+#number of seconds a thread will wait to get/put in a queue
+QUEUE_WAIT_TIMEOUT = 10
 #non-standard unicode values (either encoded or not) which need to be purged from the JSON API output;
 #the state of being encoded or not encoded in the original text output seems to depend on some form 
 #of unicode string black magic that I can't quite understand...
@@ -114,6 +112,8 @@ JSON_UNICODE_FILTERED_VALUES = ('', '\\u0092', '\\u0093', '\\u0094', '\\u0097')
 
 def sigterm_handler(signum, frame):
     logger.info('Stopping scan due to SIGTERM...')
+    
+    terminate_event.set()
     
     raise SystemExit(0)
 
@@ -880,16 +880,15 @@ def gog_products_bulk_query(product_id, scan_mode, session, db_connection):
         
         return False
             
-def worker_thread(thread_number, scan_mode, terminate_event):
-    queue_empty = False
+def worker_thread(thread_number, scan_mode, id_queue, terminate_event):
     threadConfigParser = ConfigParser()
         
     with requests.Session() as threadSession, sqlite3.connect(db_file_path) as thread_db_connection:
         logger.info(f'Starting thread T#{thread_number}...')
         
-        while not queue_empty and not terminate_event.is_set():
+        while not terminate_event.is_set():
             try:
-                product_id = queue.get(True, QUEUE_WAIT_TIMEOUT)
+                product_id = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
                 
                 retry_counter = 0
                 retries_complete = False
@@ -922,11 +921,8 @@ def worker_thread(thread_number, scan_mode, terminate_event):
                             
                         logger.info(f'T#{thread_number} >>> Processed up to id: {product_id}...')
                 
-                queue.task_done()
-                
-            except Empty:
+            except queue.Empty:
                 logger.debug(f'T#{thread_number} >>> Timed out while waiting for queue.')
-                queue_empty = True
                 
         logger.info(f'Stopping thread T#{thread_number}...')
 
@@ -1036,7 +1032,7 @@ if __name__=="__main__":
         logger.info(f'Restarting scan from id: {product_id}.')
         
         stop_id_reached = False
-        queue = Queue(CONNECTION_THREADS * 2)
+        id_queue = queue.Queue(CONNECTION_THREADS * 2)
         thread_list = []
         
         try:
@@ -1046,20 +1042,25 @@ if __name__=="__main__":
                 thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
                 #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
                 thread = threading.Thread(target=worker_thread, 
-                                          args=(thread_no_nice, scan_mode, terminate_event), 
+                                          args=(thread_no_nice, scan_mode, 
+                                                id_queue, terminate_event), 
                                           daemon=True)
                 thread.start()
                 thread_list.append(thread)
         
             while not stop_id_reached and not terminate_event.is_set():
-                #pass only the start product_id for the current batch
-                queue.put(product_id)
-                #skip an IDS_IN_BATCH interval
-                product_id += IDS_IN_BATCH
-                    
-                if product_id > stop_id:
-                    logger.info(f'Stop id of {stop_id} reached. Halting processing...')
-                    stop_id_reached = True
+                try:
+                    #pass only the start product_id for the current batch
+                    id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
+                    #skip an IDS_IN_BATCH interval
+                    product_id += IDS_IN_BATCH
+                        
+                    if product_id > stop_id:
+                        logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+                        stop_id_reached = True
+                
+                except queue.Full:
+                    logger.debug('Timed out on queue insert.')
                 
         except KeyboardInterrupt:
             terminate_event.set()
@@ -1068,7 +1069,7 @@ if __name__=="__main__":
             logger.info('Waiting for the worker threads to complete...')
             
             for thread in thread_list:
-                thread.join(THREAD_SYNC_TIMEOUT)
+                thread.join()
                 
             logger.info('The worker threads have been stopped.')
             
