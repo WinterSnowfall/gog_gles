@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.42
-@date: 20/11/2022
+@version: 3.52
+@date: 26/11/2022
 
 Warning: Built for use with python 3.6+
 '''
 
 import sqlite3
 import logging
+import signal
 import argparse
 import os
 from sys import argv
@@ -54,6 +55,16 @@ DARKNESS_CHART_COLORS = ['black', 'slategray', 'lightgray']
 
 CHART_LABELS = ['Type: game', 'Type: dlc', 'Type: pack']
 
+def sigterm_handler(signum, frame):
+    logger.debug('Stopping scan due to SIGTERM...')
+    
+    raise SystemExit(0)
+
+def sigint_handler(signum, frame):
+    logger.debug('Stopping scan due to SIGINT...')
+    
+    raise SystemExit(0)
+
 def plot_id_timeline(mode, db_connection):
     pyplot.suptitle('gog_gles - GOG product id detection timeline (with id / detection date histograms)')
     window_title = f'gog_{mode}_{file_date}'
@@ -61,7 +72,7 @@ def plot_id_timeline(mode, db_connection):
     pyplot.gcf().set_size_inches(PNG_WIDTH_INCHES, PNG_HEIGHT_INCHES)
     
     #generate gridspec and subplots on a 1/6 ratio
-    gspec = gridspec.GridSpec(6,6)
+    gspec = gridspec.GridSpec(6, 6)
     top_hist = pyplot.subplot(gspec[0, 1:])
     side_hist = pyplot.subplot(gspec[1:, 0])
     dist_chart = pyplot.subplot(gspec[1:, 1:], sharey=side_hist, sharex=top_hist)
@@ -113,22 +124,22 @@ def plot_id_timeline(mode, db_connection):
         elif current_game_type == 'pack':
             pack_detection_date_list.append(current_date)
             pack_id_list.append(current_id)
-            
+        
         #add unique months to a set and base the histogram bins size on set length
         month_list.add(current_date.replace(day=1))
-        
+    
     min_id = min(*game_id_list, *dlc_id_list, *pack_id_list)
-        
+    
     #generate main scatter chart
-    dist_chart.scatter(game_detection_date_list, game_id_list, s=5 ,c=CHART_COLORS[0])
-    dist_chart.scatter(dlc_detection_date_list, dlc_id_list, s=5 ,c=CHART_COLORS[1])
-    dist_chart.scatter(pack_detection_date_list, pack_id_list, s=5 ,c=CHART_COLORS[2])
-                
+    dist_chart.scatter(game_detection_date_list, game_id_list, s=5, c=CHART_COLORS[0])
+    dist_chart.scatter(dlc_detection_date_list, dlc_id_list, s=5, c=CHART_COLORS[1])
+    dist_chart.scatter(pack_detection_date_list, pack_id_list, s=5, c=CHART_COLORS[2])
+    
     #generate top histogram (detection dates)
     top_hist.hist([game_detection_date_list, dlc_detection_date_list, pack_detection_date_list], 
                   bins=len(month_list), color=CHART_COLORS, stacked=True, label=CHART_LABELS)
     top_hist.legend(loc=2, ncol=3)
-
+    
     #generate side histogram (ids)
     side_hist.hist([game_id_list, dlc_id_list, pack_id_list], orientation='horizontal', 
                    bins=range(min_id - ID_INTERVAL_LENGTH, MAX_ID + ID_INTERVAL_LENGTH, ID_INTERVAL_LENGTH), 
@@ -138,19 +149,19 @@ def plot_id_timeline(mode, db_connection):
     #hide duplicate tick labels
     pyplot.setp(dist_chart.get_yticklabels(), visible=False)
     pyplot.setp(top_hist.get_xticklabels(), visible=False)
-
+    
     #set proper limits for x/y axes
     dist_chart.set_xlim(min(*game_detection_date_list, *dlc_detection_date_list, *pack_detection_date_list) - timedelta(weeks=+1), 
                     max(*game_detection_date_list, *dlc_detection_date_list, *pack_detection_date_list) + timedelta(weeks=+1))
     dist_chart.set_ylim(min_id - ID_INTERVAL_LENGTH, MAX_ID_WITH_OFFSET)
     #reduce exterior padding
-    pyplot.tight_layout(5,1,0)
+    pyplot.tight_layout(5, 1, 0)
     
     pyplot.ioff()
     pyplot.savefig(os.path.join('..', 'output_plot', window_title + '.png'))
     #uncomment for debugging purposes only
     #pyplot.show()
-        
+
 def plot_id_distribution(mode, db_connection):
     window_title = f'gog_{mode}_{file_date}'
     pyplot.gcf().canvas.set_window_title(window_title)
@@ -179,13 +190,13 @@ def plot_id_distribution(mode, db_connection):
     if mode == 'distribution':
         pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (all ids)')
         db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
-                                          'AND gp_int_delisted IS NULL ORDER BY 1', (CUTOFF_ID, ))
+                                          'AND gp_int_delisted IS NULL ORDER BY 1', (CUTOFF_ID,))
     else:
         pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (incremental ids)')
         db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_added > ? AND gp_int_delisted IS NULL ORDER BY 1',
                                           (CUTOFF_ID, CUTOFF_DATE))
-        
+    
     for row in db_cursor:
         current_id = row[0]
         logger.debug(f'current_id: {current_id}')
@@ -198,9 +209,9 @@ def plot_id_distribution(mode, db_connection):
             dlc_id_list.append(current_id)
         elif current_game_type == 'pack':
             pack_id_list.append(current_id)
-        
+    
     min_id = min(*game_id_list, *dlc_id_list, *pack_id_list)
-        
+    
     #generate id histogram
     pyplot.hist([game_id_list, dlc_id_list, pack_id_list], 
                 bins=range(min_id - ID_INTERVAL_LENGTH, MAX_ID + ID_INTERVAL_LENGTH, ID_INTERVAL_LENGTH), 
@@ -210,14 +221,19 @@ def plot_id_distribution(mode, db_connection):
     #set proper limits for x axis
     pyplot.gca().set_xlim(min_id - ID_INTERVAL_LENGTH, MAX_ID_WITH_OFFSET)
     #reduce exterior padding
-    pyplot.tight_layout(5,1,0)
+    pyplot.tight_layout(5, 1, 0)
     
     pyplot.ioff()
     pyplot.savefig(os.path.join('..', 'output_plot', window_title + '.png'))
     #uncomment for debugging purposes only
     #pyplot.show()
 
-if __name__=="__main__":
+if __name__ == "__main__":
+    #catch SIGTERM and exit gracefully
+    signal.signal(signal.SIGTERM, sigterm_handler)
+    #catch SIGINT and exit gracefully
+    signal.signal(signal.SIGINT, sigint_handler)
+    
     parser = argparse.ArgumentParser(description=('GOG plot generation (part of gog_gles) - a script to generate GOG-related '
                                                   'statistics and charts.'))
     
@@ -246,7 +262,7 @@ if __name__=="__main__":
             plot_mode = 'distribution'
         elif args.incremental:
             plot_mode = 'incremental'
-            
+        
         if args.colors == 'sunset':
             CHART_COLORS = SUNSET_CHART_COLORS
         elif args.colors == 'fire':
@@ -255,30 +271,42 @@ if __name__=="__main__":
             CHART_COLORS = DARKNESS_CHART_COLORS
     
     if plot_mode == 'timeline':
-        logger.info('--- Running in ID TIMELINE mode ---')
-        
-        with sqlite3.connect(db_file_path) as db_connection:
-            plot_id_timeline(plot_mode, db_connection)
+        try:
+            logger.info('--- Running in ID TIMELINE mode ---')
             
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
+            with sqlite3.connect(db_file_path) as db_connection:
+                plot_id_timeline(plot_mode, db_connection)
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
         
+        except SystemExit:
+            logger.info('Stopping timeline generation...')
+    
     elif plot_mode == 'distribution':
-        logger.info('--- Running in ID DISTRIBUTION mode (all) ---')
-        
-        with sqlite3.connect(db_file_path) as db_connection:
-            plot_id_distribution(plot_mode, db_connection)
+        try:
+            logger.info('--- Running in ID DISTRIBUTION mode (all) ---')
             
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
+            with sqlite3.connect(db_file_path) as db_connection:
+                plot_id_distribution(plot_mode, db_connection)
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
         
+        except SystemExit:
+            logger.info('Stopping distribution generation...')
+    
     elif plot_mode == 'incremental':
-        logger.info('--- Running in ID DISTRIBUTION mode (incremental) ---')
-        
-        with sqlite3.connect(db_file_path) as db_connection:
-            plot_id_distribution(plot_mode, db_connection)
+        try:
+            logger.info('--- Running in ID DISTRIBUTION mode (incremental) ---')
             
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
+            with sqlite3.connect(db_file_path) as db_connection:
+                plot_id_distribution(plot_mode, db_connection)
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+        
+        except SystemExit:
+            logger.info('Stopping incremental generation...')
     
     logger.info('All done! Exiting...')

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.42
-@date: 20/11/2022
+@version: 3.52
+@date: 26/11/2022
 
 Warning: Built for use with python 3.6+
 '''
 
 import json
 import sqlite3
+import signal
 import requests
 import logging
 import argparse
@@ -23,10 +24,6 @@ from logging.handlers import RotatingFileHandler
 #uncomment for debugging purposes only
 #import traceback
 
-##global parameters init
-configParser = ConfigParser()
-terminate_signal = False
-
 ##conf file block
 conf_file_path = os.path.join('..', 'conf', 'gog_prices_scan.conf')
 
@@ -38,8 +35,8 @@ logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
 logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
-#logging level for current logger
-logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+#logging level defaults to INFO, but can be later modified through config file values
+logger.setLevel(logging.INFO)
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
@@ -49,7 +46,19 @@ db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 INSERT_PRICES_QUERY = 'INSERT INTO gog_prices VALUES (?,?,?,?,?,?,?,?,?)'
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
+
+HTTP_OK = 200
+
+def sigterm_handler(signum, frame):
+    logger.debug('Stopping scan due to SIGTERM...')
     
+    raise SystemExit(0)
+
+def sigint_handler(signum, frame):
+    logger.debug('Stopping scan due to SIGINT...')
+    
+    raise SystemExit(0)
+
 def gog_prices_query(product_id, product_title, country_code, currencies_list, session, db_connection):
     
     prices_url = f'https://api.gog.com/products/{product_id}/prices?countryCode={country_code}'
@@ -59,7 +68,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
         
         logger.debug(f'PQ >>> HTTP response code: {response.status_code}.')
         
-        if response.status_code == 200:
+        if response.status_code == HTTP_OK:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
             
             items = json_parsed['_embedded']['prices']
@@ -67,7 +76,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
             
             if len(items) > 0:
                 logger.debug(f'PQ >>> Found something for id {product_id}...')
-            
+                
                 db_cursor = db_connection.cursor()
                 
                 for json_item in items:
@@ -76,22 +85,22 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
                     
                     if currency in currencies_list or 'all' in currencies_list:
                         #remove currency value from all price values along with any whitespace
-                        base_price_str = json_item['basePrice'].replace(currency,'').strip()
+                        base_price_str = json_item['basePrice'].replace(currency, '').strip()
                         if base_price_str != '0':
                             base_price = float(''.join((base_price_str[:-2], '.', base_price_str[-2:])))
                         else:
                             base_price = 0
                         logger.debug(f'PQ >>> base_price is: {base_price}.')
                         
-                        final_price_str = json_item['finalPrice'].replace(currency,'').strip()
+                        final_price_str = json_item['finalPrice'].replace(currency, '').strip()
                         if final_price_str != '0':
                             final_price = float(''.join((final_price_str[:-2], '.', final_price_str[-2:])))
                         else:
                             final_price = 0
                         logger.debug(f'PQ >>> final_price is: {final_price}.')
                         
-                        db_cursor.execute('SELECT COUNT(*) FROM gog_prices WHERE gpr_int_id = ? AND gpr_int_outdated IS NULL ' 
-                                          'AND gpr_int_country_code = ? AND gpr_currency = ? AND gpr_base_price = ? AND gpr_final_price = ?',
+                        db_cursor.execute('SELECT COUNT(*) FROM gog_prices WHERE gpr_int_id = ? AND gpr_int_outdated IS NULL '
+                                          'AND gpr_int_country_code = ? AND gpr_currency = ? AND gpr_base_price = ? AND gpr_final_price = ?', 
                                           (product_id, country_code, currency, base_price, final_price))
                         existing_entries = db_cursor.fetchone()[0]
                         
@@ -133,7 +142,7 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
     except requests.Timeout:
         logger.warning(f'PQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds.')
         return False
-        
+    
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'PQ >>> Connection SSL error encountered for {product_id}.')
@@ -150,7 +159,12 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
         #logger.error(traceback.format_exc())
         return False
 
-if __name__=="__main__":
+if __name__ == "__main__":
+    #catch SIGTERM and exit gracefully
+    signal.signal(signal.SIGTERM, sigterm_handler)
+    #catch SIGINT and exit gracefully
+    signal.signal(signal.SIGINT, sigint_handler)
+    
     parser = argparse.ArgumentParser(description=('GOG prices scan (part of gog_gles) - a script to call publicly available GOG APIs '
                                                   'in order to retrieve product price information.'))
     
@@ -160,26 +174,41 @@ if __name__=="__main__":
     
     args = parser.parse_args()
     
-    logger.info('*** Running PRICES scan script ***')
-        
+    configParser = ConfigParser()
+    
     try:
-        #reading from config file
         configParser.read(conf_file_path)
-        general_section = configParser['GENERAL']
+        
         #parsing generic parameters
-        conf_backup = general_section.get('conf_backup')
-        db_backup = general_section.get('db_backup')
+        general_section = configParser['GENERAL']
+        LOGGING_LEVEL = general_section.get('logging_level').upper()
+        
+        #DEBUG, INFO, WARNING, ERROR, CRITICAL
+        #remains set to INFO if none of the other valid log levels are specified
+        if LOGGING_LEVEL == 'INFO':
+            pass
+        elif LOGGING_LEVEL == 'DEBUG':
+            logger.setLevel(logging.DEBUG)
+        elif LOGGING_LEVEL == 'WARNING':
+            logger.setLevel(logging.WARNING)
+        elif LOGGING_LEVEL == 'ERROR':
+            logger.setLevel(logging.ERROR)
+        elif LOGGING_LEVEL == 'CRITICAL':
+            logger.setLevel(logging.CRITICAL)
+
         scan_mode = general_section.get('scan_mode')
-        country_code = general_section.get('country_code')
-        currencies_list = general_section.get('currencies_list')
-        currencies_list = [currency.strip() for currency in currencies_list.split(',')]
-        #parsing constants
+        CONF_BACKUP = general_section.get('conf_backup')
+        DB_BACKUP = general_section.get('db_backup')
+        COUNTRY_CODE = general_section.get('country_code')
+        CURRENCIES_LIST = [currency.strip() for currency in general_section.get('currencies_list').split(',')]
         HTTP_TIMEOUT = general_section.getint('http_timeout')
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
+    
+    logger.info('*** Running PRICES scan script ***')
     
     #detect any parameter overrides and set the scan_mode accordingly
     if len(argv) > 1:
@@ -191,7 +220,7 @@ if __name__=="__main__":
             scan_mode = 'archive'
     
     #boolean 'true' or scan_mode specific activation
-    if conf_backup == 'true' or conf_backup == scan_mode:
+    if CONF_BACKUP == 'true' or CONF_BACKUP == scan_mode:
         if os.path.exists(conf_file_path):
             #create a backup of the existing conf file - mostly for debugging/recovery
             copy2(conf_file_path, conf_file_path + '.bak')
@@ -201,7 +230,7 @@ if __name__=="__main__":
             raise SystemExit(2)
     
     #boolean 'true' or scan_mode specific activation
-    if db_backup == 'true' or db_backup == scan_mode:
+    if DB_BACKUP == 'true' or DB_BACKUP == scan_mode:
         if os.path.exists(db_file_path):
             #create a backup of the existing db - mostly for debugging/recovery
             copy2(db_file_path, db_file_path + '.bak')
@@ -210,6 +239,8 @@ if __name__=="__main__":
             #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
             raise SystemExit(3)
+    
+    terminate_signal = False
     
     if scan_mode == 'update':
         logger.info('--- Running in UPDATE scan mode ---')
@@ -231,10 +262,10 @@ if __name__=="__main__":
             
             with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
                 db_cursor = db_connection.execute('SELECT gp_id, gp_title FROM gog_products WHERE gp_id > ? AND '
-                                                  'gp_int_delisted IS NULL ORDER BY 1', (last_id, ))
+                                                  'gp_int_delisted IS NULL ORDER BY 1', (last_id,))
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
-            
+                
                 #used to track the number of processed ids
                 last_id_counter = 0
                 
@@ -250,38 +281,39 @@ if __name__=="__main__":
                             logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            
-                        retries_complete = gog_prices_query(current_product_id, current_product_title, country_code, 
-                                                            currencies_list, session, db_connection)
-                            
+                        
+                        retries_complete = gog_prices_query(current_product_id, current_product_title, COUNTRY_CODE, 
+                                                            CURRENCIES_LIST, session, db_connection)
+                        
                         if retries_complete:
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for {current_product_id}.')
-                                
+                            
                             last_id_counter += 1
-                                
+                        
                         else:
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_signal = True
-                                
+                    
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
                         configParser.read(conf_file_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
                         with open(conf_file_path, 'w') as file:
                             configParser.write(file)
-                            
+                        
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
-                
-        except KeyboardInterrupt:
-            terminate_signal = True
         
+        except SystemExit:
+            terminate_signal = True
+            logger.info('Stopping update scan...')
+    
     elif scan_mode == 'archive':
         logger.info('--- Running in ARCHIVE scan mode ---')
         
@@ -301,23 +333,24 @@ if __name__=="__main__":
                     logger.debug(f'Now processing id {current_product_id}...')
                     
                     db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated = ? WHERE gpr_int_id = ? AND gpr_int_outdated IS NULL '
-                                      'AND gpr_int_country_code = ?', (datetime.now(), current_product_id, country_code))
-                    logger.info(f'Succesfully outdated the DB entry for {current_product_id}: {current_product_title}, {country_code}, all currencies.')
-                    
+                                      'AND gpr_int_country_code = ?', (datetime.now(), current_product_id, COUNTRY_CODE))
+                    logger.info(f'Succesfully outdated the DB entry for {current_product_id}: {current_product_title}, {COUNTRY_CODE}, all currencies.')
+                
                 #batch commit
                 db_connection.commit()
-                    
+                
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
         
-        except KeyboardInterrupt:
+        except SystemExit:
             terminate_signal = True
+            logger.info('Stopping archive scan...')
     
     if not terminate_signal and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')
         configParser.read(conf_file_path)
         configParser['UPDATE_SCAN']['last_id'] = ''
-                
+        
         with open(conf_file_path, 'w') as file:
             configParser.write(file)
     

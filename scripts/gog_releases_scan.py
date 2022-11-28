@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.42
-@date: 20/11/2022
+@version: 3.52
+@date: 26/11/2022
 
 Warning: Built for use with python 3.6+
 '''
 
 import json
-import threading
+import multiprocessing
 import queue
 import sqlite3
 import signal
@@ -27,14 +27,6 @@ from logging.handlers import RotatingFileHandler
 #uncomment for debugging purposes only
 #import traceback
 
-##global parameters init
-configParser = ConfigParser()
-db_lock = threading.Lock()
-config_lock = threading.Lock()
-##shared thread events
-terminate_event = threading.Event()
-terminate_event.clear()
-
 ##conf file block
 conf_file_path = os.path.join('..', 'conf', 'gog_releases_scan.conf')
 
@@ -46,8 +38,8 @@ logger_file_handler.setFormatter(logging.Formatter(logger_format))
 #logging level for other modules
 logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
-#logging level for current logger
-logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+#logging level defaults to INFO, but can be later modified through config file values
+logger.setLevel(logging.INFO)
 logger.addHandler(logger_file_handler)
 
 ##db configuration block
@@ -71,34 +63,48 @@ OPTIMIZE_QUERY = 'PRAGMA optimize'
 
 #value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
-#number of seconds a thread will wait to get/put in a queue
-QUEUE_WAIT_TIMEOUT = 10
+#number of seconds a process will wait to get/put in a queue
+QUEUE_WAIT_TIMEOUT = 10 #seconds
+#allow a process to fully load before starting the next process 
+#(helps preserve process start order)
+PROCESS_START_WAIT_INTERVAL = 0.1 #seconds
+HTTP_OK = 200
 
 def sigterm_handler(signum, frame):
-    logger.info('Stopping scan due to SIGTERM...')
+    #exceptions may happen here as well due to logger syncronization mayhem on shutdown
+    try:
+        logger.debug('Stopping scan due to SIGTERM...')
+    except:
+        pass
     
-    terminate_event.set()
+    raise SystemExit(0)
+
+def sigint_handler(signum, frame):
+    #exceptions may happen here as well due to logger syncronization mayhem on shutdown
+    try:
+        logger.debug('Stopping scan due to SIGINT...')
+    except:
+        pass
     
     raise SystemExit(0)
     
-def gog_releases_query(release_id, scan_mode, session, db_connection):
+def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_connection):
     
     releases_url = f'https://gamesdb.gog.com/platforms/gog/external_releases/{release_id}'
     
     try:
         response = session.get(releases_url, timeout=HTTP_TIMEOUT)
             
-        logger.debug(f'RQ >>> HTTP response code: {response.status_code}.')
+        logger.debug(f'{process_tag}RQ >>> HTTP response code: {response.status_code}.')
         
-        if response.status_code == 200:
+        if response.status_code == HTTP_OK:
             if scan_mode == 'full':
-                logger.info(f'RQ >>> Releases query for id {release_id} has returned a valid response...')
+                logger.info(f'{process_tag}RQ >>> Releases query for id {release_id} has returned a valid response...')
             
-            db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_releases WHERE gr_external_id = ?', (release_id, ))
+            db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_releases WHERE gr_external_id = ?', (release_id,))
             entry_count = db_cursor.fetchone()[0]
             
             if not (entry_count == 1 and scan_mode == 'full'):
-                
                 json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
                 json_formatted = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
                 
@@ -120,33 +126,33 @@ def gog_releases_query(release_id, scan_mode, session, db_connection):
                 first_release_date = json_parsed['game']['first_release_date']
                 visible_in_library = json_parsed['game']['visible_in_library']
                 aggregated_rating = json_parsed['game']['aggregated_rating']
-                    
+            
             if entry_count == 0:
                 with db_lock:
                     #gr_int_nr, gr_int_added, gr_int_delisted, gr_int_updated, gr_int_json_payload, 
                     #gr_int_json_diff, gr_external_id, gr_title, gr_type, 
                     #gr_supported_oses, gr_genres, gr_series, gr_first_release_date, 
                     #gr_visible_in_library, gr_aggregated_rating
-                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted,
+                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted, 
                                                         None, release_id, release_title, release_type, 
                                                         supported_oses, genres, series, first_release_date, 
                                                         visible_in_library, aggregated_rating))
                     db_connection.commit()
-                logger.info(f'PQ +++ Added a new DB entry for {release_id}: {release_title}.')
-                
+                logger.info(f'{process_tag}RQ +++ Added a new DB entry for {release_id}: {release_title}.')
+            
             elif entry_count == 1:
                 #do not update existing entries in a full scan, since update/delta scans will take care of that
                 if scan_mode == 'full':
-                    logger.info(f'PQ >>> Found an existing db entry with id {release_id}. Skipping.')
-        
+                    logger.info(f'{process_tag}RQ >>> Found an existing db entry with id {release_id}. Skipping.')
+                
                 else:
-                    db_cursor.execute('SELECT gr_int_json_payload FROM gog_releases WHERE gr_external_id = ?', (release_id, ))
+                    db_cursor.execute('SELECT gr_int_json_payload FROM gog_releases WHERE gr_external_id = ?', (release_id,))
                     existing_json_formatted = db_cursor.fetchone()[0]
                     
                     if existing_json_formatted != json_formatted:
-                        logger.debug(f'PQ >>> Existing entry for {release_id} is outdated. Updating...')
+                        logger.debug(f'{process_tag}RQ >>> Existing entry for {release_id} is outdated. Updating...')
                         
-                        #calculate the diff between the new json and the previous one
+                        #calculate the diff between the new json and the previous one 
                         #(applying the diff on the new json will revert to the previous version)
                         if existing_json_formatted is not None:
                             diff_formatted = ''.join([line for line in difflib.unified_diff(json_formatted.splitlines(1), 
@@ -162,101 +168,117 @@ def gog_releases_query(release_id, scan_mode, session, db_connection):
                                                                 release_type, supported_oses, genres, series, first_release_date, 
                                                                 visible_in_library, aggregated_rating, release_id))
                             db_connection.commit()
-                        logger.info(f'PQ ~~~ Updated the DB entry for {release_id}: {release_title}.')
+                        logger.info(f'{process_tag}RQ ~~~ Updated the DB entry for {release_id}: {release_title}.')
         
         #existing ids return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
             #check to see the existing value for gp_int_no_longer_listed
-            db_cursor = db_connection.execute('SELECT gr_title, gr_int_delisted FROM gog_releases WHERE gr_external_id = ?', (release_id, ))
+            db_cursor = db_connection.execute('SELECT gr_title, gr_int_delisted FROM gog_releases WHERE gr_external_id = ?', (release_id,))
             release_title, existing_delisted = db_cursor.fetchone()
             
             #only alter the entry if not already marked as no longer listed
             if existing_delisted is None:
-                logger.debug(f'PQ >>> Release with id {release_id} has been delisted...')
+                logger.debug(f'{process_tag}RQ >>> Release with id {release_id} has been delisted...')
                 with db_lock:
                     db_cursor.execute('UPDATE gog_releases SET gr_int_delisted = ? WHERE gr_external_id = ?', (datetime.now(), release_id))
                     db_connection.commit()
-                logger.info(f'PQ --- Delisted the DB entry for: {release_id}: {release_title}.')
+                logger.info(f'{process_tag}RQ --- Delisted the DB entry for: {release_id}: {release_title}.')
             else:
-                logger.debug(f'PQ >>> Release with id {release_id} is already marked as delisted.')
-                        
+                logger.debug(f'{process_tag}RQ >>> Release with id {release_id} is already marked as delisted.')
+        
         #unmapped ids will also return a 404 HTTP error code
         elif response.status_code == 404:
-            logger.debug(f'RQ >>> Release with id {release_id} returned a HTTP 404 error code. Skipping.')
+            logger.debug(f'{process_tag}RQ >>> Release with id {release_id} returned a HTTP 404 error code. Skipping.')
         
         else:
-            logger.warning(f'RQ >>> HTTP error code {response.status_code} received for {release_id}.')
+            logger.warning(f'{process_tag}RQ >>> HTTP error code {response.status_code} received for {release_id}.')
             raise Exception()
         
         return True
     
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
-        logger.warning(f'RQ >>> Connection SSL error encountered for {release_id}.')
+        logger.warning(f'{process_tag}RQ >>> Connection SSL error encountered for {release_id}.')
         return False
     
     #sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
-        logger.warning(f'RQ >>> Connection error encountered for {release_id}.')
+        logger.warning(f'{process_tag}RQ >>> Connection error encountered for {release_id}.')
         return False
     
     except:
-        logger.debug(f'RQ >>> External releases query has failed for {release_id}.')
+        logger.debug(f'{process_tag}RQ >>> External releases query has failed for {release_id}.')
         #uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         
         return False
+
+def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock, terminate_event):
+    #catch SIGTERM and exit gracefully
+    signal.signal(signal.SIGTERM, sigterm_handler)
+    #catch SIGINT and exit gracefully
+    signal.signal(signal.SIGINT, sigint_handler)
     
-def worker_thread(thread_number, scan_mode, id_queue, terminate_event):
-    threadConfigParser = ConfigParser()
+    processConfigParser = ConfigParser()
+    
+    with requests.Session() as processSession, sqlite3.connect(db_file_path) as process_db_connection:
+        logger.info(f'{process_tag}>>> Starting worker process...')
         
-    with requests.Session() as threadSession, sqlite3.connect(db_file_path) as thread_db_connection:
-        logger.info(f'Starting thread T#{thread_number}...')
-        
-        while not terminate_event.is_set():
-            try:
+        try:
+            while not terminate_event.is_set():
                 product_id = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
-            
+                
                 retry_counter = 0
                 retries_complete = False
                 
                 while not retries_complete and not terminate_event.is_set():
                     if retry_counter > 0:
-                        logger.debug(f'T#{thread_number} >>> Retry count: {retry_counter}.')
-                        #main iternation incremental sleep
+                        logger.debug(f'{process_tag}>>> Retry count: {retry_counter}.')
+                        #main iteration incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
                     
-                    retries_complete = gog_releases_query(product_id, scan_mode, threadSession, thread_db_connection)
+                    retries_complete = gog_releases_query(process_tag, product_id, scan_mode, db_lock, 
+                                                          processSession, process_db_connection)
                     
                     if retries_complete:
                         if retry_counter > 0:
-                            logger.info(f'T#{thread_number} >>> Succesfully retried for {product_id}.')
+                            logger.info(f'{process_tag}>>> Succesfully retried for {product_id}.')
                     else:
                         retry_counter += 1
                         #terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
-                            logger.critical(f'T#{thread_number} >>> Request most likely blocked/invalidated by GOG. Terminating process!')    
+                            logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
                             terminate_event.set()
-                    
+                
                 if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
-                        threadConfigParser.read(conf_file_path)
-                        threadConfigParser['FULL_SCAN']['start_id'] = str(product_id)
+                        processConfigParser.read(conf_file_path)
+                        processConfigParser['FULL_SCAN']['start_id'] = str(product_id)
                         
                         with open(conf_file_path, 'w') as file:
-                            threadConfigParser.write(file)
-                            
-                        logger.info(f'T#{thread_number} >>> Processed up to id: {product_id}...')
-            
-            except queue.Empty:
-                logger.debug(f'T#{thread_number} >>> Timed out while waiting for queue.')         
-            
-        logger.info(f'Stopping thread T#{thread_number}...')
+                            processConfigParser.write(file)
+                        
+                        logger.info(f'{process_tag}>>> Processed up to id: {product_id}...')
         
-        logger.debug('Running PRAGMA optimize...')
-        thread_db_connection.execute(OPTIMIZE_QUERY)
-            
-if __name__=="__main__":
+        #the main process has stopped populating the queue if this exception is raised
+        except queue.Empty:
+            logger.debug(f'{process_tag}>>> Timed out while waiting for queue.')
+        
+        except SystemExit:
+            pass
+        
+        logger.info(f'{process_tag}>>> Stopping worker process...')
+        
+        logger.debug(f'{process_tag}>>> Running PRAGMA optimize...')
+        with db_lock:
+            process_db_connection.execute(OPTIMIZE_QUERY)
+
+if __name__ == "__main__":
+    #catch SIGTERM and exit gracefully
+    signal.signal(signal.SIGTERM, sigterm_handler)
+    #catch SIGINT and exit gracefully
+    signal.signal(signal.SIGINT, sigint_handler)
+    
     parser = argparse.ArgumentParser(description=('GOG releases scan (part of gog_gles) - a script to call publicly available GOG APIs '
                                                   'in order to retrieve releases information and updates.'))
     
@@ -268,17 +290,31 @@ if __name__=="__main__":
     
     args = parser.parse_args()
     
-    logger.info('*** Running RELEASES scan script ***')
-        
+    configParser = ConfigParser()
+    
     try:
-        #reading from config file
         configParser.read(conf_file_path)
-        general_section = configParser['GENERAL']
+        
         #parsing generic parameters
-        conf_backup = general_section.get('conf_backup')
-        db_backup = general_section.get('db_backup')
+        general_section = configParser['GENERAL']
+        LOGGING_LEVEL = general_section.get('logging_level').upper()
+        
+        #DEBUG, INFO, WARNING, ERROR, CRITICAL
+        #remains set to INFO if none of the other valid log levels are specified
+        if LOGGING_LEVEL == 'INFO':
+            pass
+        elif LOGGING_LEVEL == 'DEBUG':
+            logger.setLevel(logging.DEBUG)
+        elif LOGGING_LEVEL == 'WARNING':
+            logger.setLevel(logging.WARNING)
+        elif LOGGING_LEVEL == 'ERROR':
+            logger.setLevel(logging.ERROR)
+        elif LOGGING_LEVEL == 'CRITICAL':
+            logger.setLevel(logging.CRITICAL)
+        
         scan_mode = general_section.get('scan_mode')
-        #parsing constants
+        CONF_BACKUP = general_section.get('conf_backup')
+        DB_BACKUP = general_section.get('db_backup')
         HTTP_TIMEOUT = general_section.getint('http_timeout')
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
@@ -286,6 +322,8 @@ if __name__=="__main__":
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
+    
+    logger.info('*** Running RELEASES scan script ***')
     
     #detect any parameter overrides and set the scan_mode accordingly
     if len(argv) > 1:
@@ -301,7 +339,7 @@ if __name__=="__main__":
             scan_mode = 'manual'
     
     #boolean 'true' or scan_mode specific activation
-    if conf_backup == 'true' or conf_backup == scan_mode:
+    if CONF_BACKUP == 'true' or CONF_BACKUP == scan_mode:
         if os.path.exists(conf_file_path):
             #create a backup of the existing conf file - mostly for debugging/recovery
             copy2(conf_file_path, conf_file_path + '.bak')
@@ -311,7 +349,7 @@ if __name__=="__main__":
             raise SystemExit(2)
     
     #boolean 'true' or scan_mode specific activation
-    if db_backup == 'true' or db_backup == scan_mode:
+    if DB_BACKUP == 'true' or DB_BACKUP == scan_mode:
         if os.path.exists(db_file_path):
             #create a backup of the existing db - mostly for debugging/recovery
             copy2(db_file_path, db_file_path + '.bak')
@@ -320,69 +358,78 @@ if __name__=="__main__":
             #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
             raise SystemExit(3)
-        
+    
+    ##inter-process resources locks
+    db_lock = multiprocessing.Lock()
+    config_lock = multiprocessing.Lock()
+    ##shared process events
+    terminate_event = multiprocessing.Event()
+    terminate_event.clear()
+    
     if scan_mode == 'full':
         logger.info('--- Running in FULL scan mode ---')
         
-        #catch SIGTERM and exit gracefully
-        signal.signal(signal.SIGTERM, sigterm_handler)
-        
         full_scan_section = configParser['FULL_SCAN']
         ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
-        #number of active connection threads
-        CONNECTION_THREADS = full_scan_section.getint('connection_threads')
-        #stop_id = 2147483647, in order to scan the full range,
+        #number of active connection processes
+        CONNECTION_PROCESSES = full_scan_section.getint('connection_processes')
+        #STOP_ID = 2147483647, in order to scan the full range,
         #stopping at the upper limit of a 32 bit signed integer type
-        stop_id = full_scan_section.getint('stop_id')
+        STOP_ID = full_scan_section.getint('stop_id')
         #product_id will restart from scan_id
         product_id = full_scan_section.getint('start_id')
-        #reduce starting point by a batch to account for any thread overlap
+        #reduce starting point by a batch to account for any process overlap
         if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
         
         logger.info(f'Restarting scan from id: {product_id}.')
         
         stop_id_reached = False
-        id_queue = queue.Queue(CONNECTION_THREADS * 2)
-        thread_list = []
+        id_queue = multiprocessing.Queue(CONNECTION_PROCESSES * 2)
+        process_list = []
         
         try:
-            for thread_no in range(CONNECTION_THREADS):
-                #apply spacing to single digit thread_no for nicer logging in case of 10+ threads
-                THREAD_LOGGING_FILLER = '0' if CONNECTION_THREADS > 9 and thread_no < 9 else ''
-                thread_no_nice = THREAD_LOGGING_FILLER + str(thread_no + 1)
-                #setting daemon threads and a max limit to the thread sync on exit interval will prevent lockups
-                thread = threading.Thread(target=worker_thread, 
-                                          args=(thread_no_nice, scan_mode, 
-                                                id_queue, terminate_event), 
-                                          daemon=True)
-                thread.start()
-                thread_list.append(thread)
-        
+            for process_no in range(CONNECTION_PROCESSES):
+                #apply spacing to single digit process_no for nicer logging in case of 10+ processes
+                PROCESS_LOGGING_FILLER = '0' if CONNECTION_PROCESSES > 9 and process_no < 9 else ''
+                process_tag_nice = ''.join(('P#', PROCESS_LOGGING_FILLER, str(process_no + 1), ' '))
+                
+                process = multiprocessing.Process(target=worker_process, 
+                                                  args=(process_tag_nice, scan_mode, id_queue, 
+                                                        db_lock, config_lock, terminate_event), 
+                                                  daemon=True)
+                process.start()
+                process_list.append(process)
+                sleep(PROCESS_START_WAIT_INTERVAL)
+            
             while not stop_id_reached and not terminate_event.is_set():
                 try:
                     id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
                     
                     logger.debug(f'Processing the following product_id: {product_id}.')
                     product_id += 1
-                        
-                    if product_id > stop_id:
-                        logger.info(f'Stop id of {stop_id} reached. Halting processing...')
+                    
+                    if product_id > STOP_ID:
+                        logger.info(f'Stop id of {STOP_ID} reached. Halting processing...')
                         stop_id_reached = True
                 
                 except queue.Full:
                     logger.debug('Timed out on queue insert.')
-                    
-        except KeyboardInterrupt:
-            terminate_event.set()
-            
+        
+        except SystemExit:
+            try:
+                terminate_event.set()
+                logger.info('Stopping full scan...')
+            except:
+                terminate_event.set()
+        
         finally:
-            logger.info('Waiting for the worker threads to complete...')
+            logger.info('Waiting for the worker processes to complete...')
             
-            for thread in thread_list:
-                thread.join()
-                
-            logger.info('The worker threads have been stopped.')
-                
+            for process in process_list:
+                process.join()
+            
+            logger.info('The worker processes have been stopped.')
+    
     elif scan_mode == 'update':
         logger.info('--- Running in UPDATE scan mode ---')
         
@@ -392,7 +439,7 @@ if __name__=="__main__":
             last_id = update_scan_section.getint('last_id')
         except ValueError:
             last_id = 0
-            
+        
         ID_SAVE_FREQUENCY = update_scan_section.getint('id_save_frequency')
         
         if last_id > 0:
@@ -404,7 +451,7 @@ if __name__=="__main__":
             with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
                 #skip releases which are no longer listed
                 db_cursor = db_connection.execute('SELECT gr_external_id FROM gog_releases WHERE gr_external_id > ? '
-                                                  'AND gr_int_delisted IS NULL ORDER BY 1', (last_id, ))
+                                                  'AND gr_int_delisted IS NULL ORDER BY 1', (last_id,))
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all existing product ids from the DB...')
                 
@@ -422,37 +469,39 @@ if __name__=="__main__":
                             logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
-                            
-                        retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
+                        
+                        retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock, 
+                                                              session, db_connection)
                         
                         if retries_complete:
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for {current_product_id}.')
                             
                             last_id_counter += 1
-                            
+                        
                         else:
                             retry_counter += 1
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-                            
+                    
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
                         configParser.read(conf_file_path)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
                         with open(conf_file_path, 'w') as file:
                             configParser.write(file)
-                            
+                        
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
-                
-        except KeyboardInterrupt:
+        
+        except SystemExit:
             terminate_event.set()
-                
+            logger.info('Stopping update scan...')
+    
     elif scan_mode == 'products':
         logger.info('--- Running in PRODUCTS scan mode ---')
         
@@ -479,8 +528,9 @@ if __name__=="__main__":
                             logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                             sleep(sleep_interval)
                             
-                        retries_complete = gog_releases_query(current_product_id, scan_mode, session, db_connection)
-                            
+                        retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock, 
+                                                              session, db_connection)
+                        
                         if retries_complete:
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for {current_product_id}.')
@@ -493,10 +543,11 @@ if __name__=="__main__":
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
-            
-        except KeyboardInterrupt:
-            terminate_event.set()
         
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping products scan...')
+    
     elif scan_mode == 'manual':
         logger.info('--- Running in MANUAL scan mode ---')
         
@@ -521,8 +572,9 @@ if __name__=="__main__":
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
                         
-                        retries_complete = gog_releases_query(product_id, scan_mode, session, db_connection)
-                            
+                        retries_complete = gog_releases_query('', product_id, scan_mode, db_lock, 
+                                                              session, db_connection)
+                        
                         if retries_complete:
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for {product_id}.')
@@ -532,18 +584,19 @@ if __name__=="__main__":
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 terminate_event.set()
-            
+                
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
-                
-        except KeyboardInterrupt:
-            terminate_event.set()
         
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping manual scan...')
+    
     if not terminate_event.is_set() and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')
         configParser.read(conf_file_path)
         configParser['UPDATE_SCAN']['last_id'] = ''
-                        
+        
         with open(conf_file_path, 'w') as file:
             configParser.write(file)
     

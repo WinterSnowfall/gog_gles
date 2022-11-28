@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.42
-@date: 20/11/2022
+@version: 3.52
+@date: 26/11/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -135,7 +135,7 @@ CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMA
                              'gr_visible_in_library INTEGER NOT NULL, '
                              'gr_aggregated_rating REAL)')
 
-if __name__=="__main__":
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_gles) - a script to create the sqlite DB structure '
                                                   'for the other gog_gles utilities.'))
     
