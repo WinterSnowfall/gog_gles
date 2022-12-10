@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.52
-@date: 26/11/2022
+@version: 3.54
+@date: 08/12/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -64,6 +64,8 @@ OPTIMIZE_QUERY = 'PRAGMA optimize'
 
 #value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
+#supported build OSes, with valid API endpoints
+SUPPORTED_OSES = ('windows', 'osx')
 #number of seconds a process will wait to get/put in a queue
 QUEUE_WAIT_TIMEOUT = 10 #seconds
 #allow a process to fully load before starting the next process
@@ -89,10 +91,10 @@ def sigint_handler(signum, frame):
     
     raise SystemExit(0)
     
-def gog_builds_query(process_tag, product_id, os, scan_mode, 
+def gog_builds_query(process_tag, product_id, os_value, scan_mode, 
                      db_lock, session, db_connection):
     
-    builds_url = f'https://content-system.gog.com/products/{product_id}/os/{os}/builds?generation=2'
+    builds_url = f'https://content-system.gog.com/products/{product_id}/os/{os_value}/builds?generation=2'
     
     try:
         response = session.get(builds_url, timeout=HTTP_TIMEOUT)
@@ -106,13 +108,14 @@ def gog_builds_query(process_tag, product_id, os, scan_mode,
                 total_count = json_parsed['total_count']
                 logger.debug(f'{process_tag}BQ >>> Total count: {total_count}.')
             except:
-                logger.warning(f'{process_tag}BQ >>> Unable to retrieve total_count for {product_id}, {os}.')
+                logger.warning(f'{process_tag}BQ >>> Unable to retrieve total_count for {product_id}, {os_value}.')
                 raise Exception()
             
             if total_count > 0:
-                logger.debug(f'{process_tag}BQ >>> Found builds for id {product_id}, {os}...')
+                logger.debug(f'{process_tag}BQ >>> Found builds for id {product_id}, {os_value}...')
                 
-                db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os))
+                db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', 
+                                                  (product_id, os_value))
                 entry_count = db_cursor.fetchone()[0]
                 
                 #no need to do any processing if an entry is found in 'full' or 'products' scan modes,
@@ -161,40 +164,40 @@ def gog_builds_query(process_tag, product_id, os, scan_mode,
                     #gb_branch_version_names, gb_has_private_branches
                     with db_lock:
                         db_cursor.execute(INSERT_BUILD_QUERY, (None, datetime.now(), None, None, json_formatted, 
-                                                               None, product_id, product_name, os, 
+                                                               None, product_id, product_name, os_value, 
                                                                total_count, count, main_version_names, 
                                                                branch_version_names, has_private_branches))
                         db_connection.commit()
-                    logger.info(f'{process_tag}BQ +++ Added a new DB entry for {product_id}: {product_name}, {os}.')
+                    logger.info(f'{process_tag}BQ +++ Added a new DB entry for {product_id}: {product_name}, {os_value}.')
                 
                 elif entry_count == 1:
                     #do not update existing entries in a full or products scan since update/delta scans will take care of that
                     if scan_mode == 'full' or scan_mode == 'products':
-                        logger.info(f'{process_tag}BQ >>> Found an existing db entry with id {product_id}, {os}. Skipping.')
+                        logger.info(f'{process_tag}BQ >>> Found an existing db entry with id {product_id}, {os_value}. Skipping.')
                     #manual scans will be treated as update scans
                     else:
                         db_cursor.execute('SELECT gb_int_removed, gb_int_json_payload, gb_int_title FROM gog_builds '
-                                          'WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os))
+                                          'WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os_value))
                         existing_removed, existing_json_formatted, existing_product_name = db_cursor.fetchone()
                         
                         if existing_removed is not None:
-                            logger.debug(f'{process_tag}BQ >>> Found a previously removed entry for {product_id}, {os}. Clearing removed status...')
+                            logger.debug(f'{process_tag}BQ >>> Found a previously removed entry for {product_id}, {os_value}. Clearing removed status...')
                             with db_lock:
                                 db_cursor.execute('UPDATE gog_builds SET gb_int_removed = NULL WHERE gb_int_id = ? AND gb_int_os = ?', 
-                                                  (product_id, os))
+                                                  (product_id, os_value))
                                 db_connection.commit()
-                            logger.info(f'{process_tag}BQ *** Cleared removed status for {product_id}, {os}: {product_name}')
+                            logger.info(f'{process_tag}BQ *** Cleared removed status for {product_id}, {os_value}: {product_name}')
                         
                         if product_name is not None and existing_product_name != product_name:
                             logger.info(f'{process_tag}BQ >>> Found a valid (or new) product name: {product_name}. Updating...')
                             with db_lock:
                                 db_cursor.execute('UPDATE gog_builds SET gb_int_title = ? WHERE gb_int_id = ? AND gb_int_os = ?', 
-                                               (product_name, product_id, os))
+                                               (product_name, product_id, os_value))
                                 db_connection.commit()
-                            logger.info(f'{process_tag}BQ ~~~ Successfully updated product name for DB entry with id {product_id}, {os}.')
+                            logger.info(f'{process_tag}BQ ~~~ Successfully updated product name for DB entry with id {product_id}, {os_value}.')
                         
                         if existing_json_formatted != json_formatted:
-                            logger.debug(f'{process_tag}BQ >>> Existing entry for {product_id}, {os} is outdated. Updating...')
+                            logger.debug(f'{process_tag}BQ >>> Existing entry for {product_id}, {os_value} is outdated. Updating...')
                             
                             #calculate the diff between the new json and the previous one
                             #(applying the diff on the new json will revert to the previous version)
@@ -207,53 +210,54 @@ def gog_builds_query(process_tag, product_id, os, scan_mode,
                             with db_lock:
                                 db_cursor.execute(UPDATE_BUILD_QUERY, (datetime.now(), json_formatted, diff_formatted, 
                                                                        total_count, count, main_version_names, branch_version_names, 
-                                                                       has_private_branches, product_id, os))
+                                                                       has_private_branches, product_id, os_value))
                                 db_connection.commit()
-                            logger.info(f'{process_tag}BQ ~~~ Updated the DB entry for {product_id}: {product_name}, {os}.')
+                            logger.info(f'{process_tag}BQ ~~~ Updated the DB entry for {product_id}: {product_name}, {os_value}.')
             
             elif scan_mode == 'update' and total_count == 0:
                 
-                db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', (product_id, os))
+                db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', 
+                                                  (product_id, os_value))
                 entry_count = db_cursor.fetchone()[0]
                 
                 if entry_count == 1:
                     #check to see the existing value for gb_int_removed
                     db_cursor = db_connection.execute('SELECT gb_int_removed, gb_int_title FROM gog_builds WHERE gb_int_id = ? AND gb_int_os = ?', 
-                                                      (product_id, os))
+                                                      (product_id, os_value))
                     existing_delisted, product_name = db_cursor.fetchone()
                     
                     #only alter the entry if not already marked as removed
                     if existing_delisted is None:
-                        logger.debug(f'{process_tag}BQ >>> All builds for {product_id}, {os} have been removed...')
+                        logger.debug(f'{process_tag}BQ >>> All builds for {product_id}, {os_value} have been removed...')
                         with db_lock:
                             #also reset/clear all other attributes in order to reflect the removal;
                             #previous values will still be stored as part of the attached json payload
                             db_cursor.execute('UPDATE gog_builds SET gb_int_removed = ?, gb_total_count = 0, gb_count = 0, '
                                               'gb_main_version_names = NULL, gb_branch_version_names = NULL, gb_has_private_branches = 0 '
-                                              'WHERE gb_int_id = ? AND gb_int_os = ?', (datetime.now(), product_id, os))
+                                              'WHERE gb_int_id = ? AND gb_int_os = ?', (datetime.now(), product_id, os_value))
                             db_connection.commit()
-                        logger.warning(f'{process_tag}BQ --- Marked the builds for {product_id}, {os}: {product_name} as removed.')
+                        logger.warning(f'{process_tag}BQ --- Marked the builds for {product_id}, {os_value}: {product_name} as removed.')
                     else:
-                        logger.debug(f'{process_tag}BQ >>> Builds for {product_id}, {os} are already marked as removed.')
+                        logger.debug(f'{process_tag}BQ >>> Builds for {product_id}, {os_value} are already marked as removed.')
         
         else:
-            logger.warning(f'{process_tag}BQ >>> HTTP error code {response.status_code} received for {product_id}, {os}.')
+            logger.warning(f'{process_tag}BQ >>> HTTP error code {response.status_code} received for {product_id}, {os_value}.')
             raise Exception()
         
         return True
     
     #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
-        logger.warning(f'{process_tag}BQ >>> Connection SSL error encountered for {product_id}, {os}.')
+        logger.warning(f'{process_tag}BQ >>> Connection SSL error encountered for {product_id}, {os_value}.')
         return False
     
     #sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
-        logger.warning(f'{process_tag}BQ >>> Connection error encountered for {product_id}, {os}.')
+        logger.warning(f'{process_tag}BQ >>> Connection error encountered for {product_id}, {os_value}.')
         return False
     
     except:
-        logger.debug(f'{process_tag}BQ >>> Builds query has failed for {product_id}, {os}.')
+        logger.debug(f'{process_tag}BQ >>> Builds query has failed for {product_id}, {os_value}.')
         #uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         return False
@@ -265,6 +269,9 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock,
     #catch SIGINT and exit gracefully
     signal.signal(signal.SIGINT, sigint_handler)
     
+    #only scan the first supported OS ('windows') and let update scans detect additional OS builds
+    FULL_SCAN_OS_VALUE = SUPPORTED_OSES[0];
+    
     processConfigParser = ConfigParser()
     
     with requests.Session() as processSession, sqlite3.connect(db_file_path) as process_db_connection:
@@ -272,7 +279,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock,
         
         try:
             while not terminate_event.is_set():
-                product_id, os = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
+                product_id = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
                 
                 retry_counter = 0
                 retries_complete = False
@@ -283,12 +290,12 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock,
                         #main iteration incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
                     
-                    retries_complete = gog_builds_query(process_tag, product_id, os, scan_mode, 
+                    retries_complete = gog_builds_query(process_tag, product_id, FULL_SCAN_OS_VALUE, scan_mode, 
                                                         db_lock, processSession, process_db_connection)
                         
                     if retries_complete:
                         if retry_counter > 0:
-                            logger.info(f'{process_tag}>>> Succesfully retried for {product_id}, {os}.')
+                            logger.info(f'{process_tag}>>> Succesfully retried for {product_id}, {FULL_SCAN_OS_VALUE}.')
                     else:
                         retry_counter += 1
                         #terminate the scan if the RETRY_COUNT limit is exceeded
@@ -296,8 +303,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock,
                             logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process.')    
                             terminate_event.set()
                 
-                #only do product_id processing on 'windows' build scans
-                if os == 'windows' and product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
+                if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
                         processConfigParser.read(conf_file_path)
                         processConfigParser['FULL_SCAN']['start_id'] = str(product_id)
@@ -456,8 +462,7 @@ if __name__ == "__main__":
             
             while not stop_id_reached and not terminate_event.is_set():
                 try:
-                    id_queue.put((product_id, 'windows'), True, QUEUE_WAIT_TIMEOUT)
-                    id_queue.put((product_id, 'osx'), True, QUEUE_WAIT_TIMEOUT)
+                    id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
                     
                     logger.debug(f'Processing the following product_id: {product_id}.')
                     product_id += 1
@@ -515,35 +520,32 @@ if __name__ == "__main__":
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
                     logger.debug(f'Now processing id {current_product_id}...')
-                    complete_windows = False
-                    complete_osx = False
-                    retry_counter = 0
                     
-                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
-                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                            sleep(sleep_interval)
+                    for os_value in SUPPORTED_OSES:
+                        retries_complete = False
+                        retry_counter = 0
                         
-                        complete_windows = gog_builds_query('', current_product_id, 'windows', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        #try other oses as well, if the 'windows' scan goes well
-                        if complete_windows:
-                            complete_osx = gog_builds_query('', current_product_id, 'osx', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        
-                        if complete_windows and complete_osx:
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
+                                sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                                logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                                sleep(sleep_interval)
                             
-                            last_id_counter += 1
-                        
-                        else:
-                            retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                terminate_event.set()
+                            retries_complete = gog_builds_query('', current_product_id, os_value, scan_mode, 
+                                                                db_lock, session, db_connection)
+                            
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}, {os_value}.')
+                                
+                                last_id_counter += 1
+                            
+                            else:
+                                retry_counter += 1
+                                #terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    terminate_event.set()
                     
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_event.is_set():
                         configParser.read(conf_file_path)
@@ -585,32 +587,29 @@ if __name__ == "__main__":
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
                     logger.debug(f'Now processing id {current_product_id}...')
-                    complete_windows = False
-                    complete_osx = False
-                    retry_counter = 0
                     
-                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
-                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                            sleep(sleep_interval)
+                    for os_value in SUPPORTED_OSES:
+                        retries_complete = False
+                        retry_counter = 0
                         
-                        complete_windows = gog_builds_query('', current_product_id, 'windows', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        #try other oses as well, if the 'windows' scan goes well
-                        if complete_windows:
-                            complete_osx = gog_builds_query('', current_product_id, 'osx', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        
-                        if complete_windows and complete_osx:
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-                        else:
-                            retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                terminate_event.set()
+                                sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                                logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                                sleep(sleep_interval)
+                            
+                            retries_complete = gog_builds_query('', current_product_id, os_value, scan_mode, 
+                                                                db_lock, session, db_connection)
+                            
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}, {os_value}.')
+                            else:
+                                retry_counter += 1
+                                #terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    terminate_event.set()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -635,32 +634,29 @@ if __name__ == "__main__":
             with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
                 for product_id in id_list:
                     logger.info(f'Running scan for id {product_id}...')
-                    complete_windows = False
-                    complete_osx = False
-                    retry_counter = 0
+
+                    for os_value in SUPPORTED_OSES:
+                        retries_complete = False
+                        retry_counter = 0
                     
-                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                            sleep(RETRY_SLEEP_INTERVAL)
-                            logger.warning(f'Reprocessing id {product_id}...')
-                        
-                        complete_windows = gog_builds_query('', product_id, 'windows', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        #try other oses as well, if the 'windows' scan goes well
-                        if complete_windows:
-                            complete_osx = gog_builds_query('', product_id, 'osx', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        
-                        if complete_windows and complete_osx:
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {product_id}.')
-                        else:
-                            retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                terminate_event.set()
+                                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                                sleep(RETRY_SLEEP_INTERVAL)
+                                logger.warning(f'Reprocessing id {product_id}...')
+                            
+                            retries_complete = gog_builds_query('', product_id, os_value, scan_mode, 
+                                                                db_lock, session, db_connection)
+                            
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {product_id}, {os_value}.')
+                            else:
+                                retry_counter += 1
+                                #terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    terminate_event.set()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -692,10 +688,10 @@ if __name__ == "__main__":
                 
                 for delta_entry in delta_list:
                     current_product_id = delta_entry[0]
-                    current_os = delta_entry[1]
-                    #'osx' compatible products have installer os field listings of 'mac', not 'osx'
-                    current_os_files = 'mac' if current_os == 'osx' else current_os
-                    logger.debug(f'Now processing id {current_product_id}, {current_os}...')
+                    current_os_value = delta_entry[1]
+                    #'osx' compatible products have installer OS field values of 'mac', not 'osx'...
+                    current_os_files = 'mac' if current_os_value == 'osx' else current_os_value
+                    logger.debug(f'Now processing id {current_product_id}, {current_os_value}...')
                     
                     current_product_title = delta_entry[2]
                     
@@ -781,11 +777,11 @@ if __name__ == "__main__":
                             excluded = True
                         
                         if not excluded and current_latest_file_version != current_latest_build_version:
-                            #add detected discrepancy to its os list
-                            detected_discrepancies[current_os].append(current_product_id)
+                            #add detected discrepancy to its OS list
+                            detected_discrepancies[current_os_value].append(current_product_id)
                             #use MAX on gid_int_false_positive, although there should only ever be one entry
                             db_cursor.execute('SELECT COUNT(*), MAX(gid_int_false_positive) FROM gog_installers_delta WHERE gid_int_id = ? '
-                                              'AND gid_int_os = ? AND gid_int_fixed IS NULL', (current_product_id, current_os))
+                                              'AND gid_int_os = ? AND gid_int_fixed IS NULL', (current_product_id, current_os_value))
                             installer_delta_entry_count, current_false_positive = db_cursor.fetchone()
                             
                             #false positive status should be set to False for new entries
@@ -794,35 +790,35 @@ if __name__ == "__main__":
                             if installer_delta_entry_count != 0:
                                 db_cursor.execute('SELECT COUNT(*) FROM gog_installers_delta WHERE gid_int_id = ? AND gid_int_os = ? '
                                                   'AND gid_int_latest_galaxy_build = ? AND gid_int_latest_installer_version = ? AND gid_int_fixed IS NULL', 
-                                                  (current_product_id, current_os, current_latest_build_version_orig, current_latest_file_version_orig))
+                                                  (current_product_id, current_os_value, current_latest_build_version_orig, current_latest_file_version_orig))
                                 installer_version_delta_entry_count = db_cursor.fetchone()[0]
                                 
                                 if installer_version_delta_entry_count != 0:
-                                    logger.debug(f'Discrepancy already logged for {current_product_id}: {current_product_title}, {current_os}. Skipping.')
+                                    logger.debug(f'Discrepancy already logged for {current_product_id}: {current_product_title}, {current_os_value}. Skipping.')
                                 else:
-                                    logger.debug(f'Found outdated discrepancy for {current_product_id}: {current_product_title}, {current_os}.')
+                                    logger.debug(f'Found outdated discrepancy for {current_product_id}: {current_product_title}, {current_os_value}.')
                                     
                                     if current_false_positive:
                                         #any updates to a discrepancy should reset the false positive state of an entry
                                         current_false_positive = False
-                                        logger.warning(f'False positive status has been reset for {current_product_id}, {current_os}.')
+                                        logger.warning(f'False positive status has been reset for {current_product_id}, {current_os_value}.')
                                     
                                     db_cursor.execute('UPDATE gog_installers_delta SET gid_int_latest_galaxy_build = ?, gid_int_latest_installer_version = ?, '
                                                       'gid_int_false_positive = ? WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
                                                       (current_latest_build_version_orig, current_latest_file_version_orig, 
-                                                       current_false_positive, current_product_id, current_os))
+                                                       current_false_positive, current_product_id, current_os_value))
                                     db_connection.commit()
-                                    logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os}.')
+                                    logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os_value}.')
                             else:
-                                logger.debug(f'Found new discrepancy for {current_product_id}: {current_product_title}, {current_os}.')
+                                logger.debug(f'Found new discrepancy for {current_product_id}: {current_product_title}, {current_os_value}.')
                                 #gid_int_nr, gid_int_added, gid_int_fixed, gid_int_id, gid_int_title, 
                                 #gid_int_os, gid_int_latest_galaxy_build, gid_int_latest_installer_version, 
                                 #gid_int_false_positive, gid_int_false_positive_reason
                                 db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now(), None, current_product_id, current_product_title, 
-                                                                                  current_os, current_latest_build_version_orig, current_latest_file_version_orig, 
+                                                                                  current_os_value, current_latest_build_version_orig, current_latest_file_version_orig, 
                                                                                   current_false_positive, None))
                                 db_connection.commit()
-                                logger.info(f'+++ Successfully added an entry for {current_product_id}: {current_product_title}, {current_os}.')
+                                logger.info(f'+++ Successfully added an entry for {current_product_id}: {current_product_title}, {current_os_value}.')
                     
                     else:
                         logger.debug(f'Product with id {current_product_id} is on the exclusion list. Skipping.')
@@ -834,16 +830,16 @@ if __name__ == "__main__":
                 for discrepancy in discrepancy_list:
                     current_product_id = discrepancy[0]
                     current_product_title = discrepancy[1]
-                    current_os = discrepancy[2]
+                    current_os_value = discrepancy[2]
                     
-                    if current_product_id not in detected_discrepancies[current_os]:
-                        logger.debug(f'Discrepancy for {current_product_id}: {current_product_title}, {current_os} has been fixed.')
+                    if current_product_id not in detected_discrepancies[current_os_value]:
+                        logger.debug(f'Discrepancy for {current_product_id}: {current_product_title}, {current_os_value} has been fixed.')
                         #also clear any existing manually set reason if a false positive entry is marked as resolved
                         db_cursor.execute('UPDATE gog_installers_delta SET gid_int_fixed = ?, gid_int_false_positive = 0, gid_int_false_positive_reason = NULL '
                                           'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
-                                          (datetime.now(), current_product_id, current_os))
+                                          (datetime.now(), current_product_id, current_os_value))
                         db_connection.commit()
-                        logger.info(f'--- Successfully updated fixed status for {current_product_id}: {current_product_title}, {current_os}.')
+                        logger.info(f'--- Successfully updated fixed status for {current_product_id}: {current_product_title}, {current_os_value}.')
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -867,32 +863,29 @@ if __name__ == "__main__":
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
                     logger.info(f'Running scan for id {current_product_id}...')
-                    complete_windows = False
-                    complete_osx = False
-                    retry_counter = 0
+
+                    for os_value in SUPPORTED_OSES:
+                        retries_complete = False
+                        retry_counter = 0
                     
-                    while not (complete_windows and complete_osx) and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                            sleep(RETRY_SLEEP_INTERVAL)
-                            logger.warning(f'Reprocessing id {current_product_id}...')
-                        
-                        complete_windows = gog_builds_query('', current_product_id, 'windows', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        #try other oses as well, if the 'windows' scan goes well
-                        if complete_windows:
-                            complete_osx = gog_builds_query('', current_product_id, 'osx', scan_mode, 
-                                                            db_lock, session, db_connection)
-                        
-                        if complete_windows and complete_osx:
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-                        else:
-                            retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                terminate_event.set()
+                                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                                sleep(RETRY_SLEEP_INTERVAL)
+                                logger.warning(f'Reprocessing id {current_product_id}...')
+                            
+                            retries_complete = gog_builds_query('', current_product_id, os_value, scan_mode, 
+                                                                db_lock, session, db_connection)
+                            
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}, {os_value}.')
+                            else:
+                                retry_counter += 1
+                                #terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    terminate_event.set()
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
