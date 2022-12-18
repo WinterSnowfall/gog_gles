@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.52
-@date: 26/11/2022
+@version: 3.60
+@date: 18/12/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -91,10 +91,10 @@ def gog_forums_query(session, db_connection):
                 
                 elif entry_count == 1:
                     db_cursor.execute('SELECT gfr_int_removed, gfr_link FROM gog_forums WHERE gfr_name = ?', (forum_name,))
-                    existing_delisted, existing_link = db_cursor.fetchone()
+                    existing_removed, existing_link = db_cursor.fetchone()
                     
-                    #clear the delisted status if an id is relisted (should only happen rarely)
-                    if existing_delisted is not None:
+                    #clear the removed status if a forum page is readded (should only happen rarely)
+                    if existing_removed is not None:
                         logger.debug(f'FRQ >>> Found a previously removed entry with name {forum_name}. Clearing removed status...')
                         db_cursor.execute('UPDATE gog_forums SET gfr_int_removed = NULL WHERE gfr_name = ?', (forum_name,))
                         db_connection.commit()

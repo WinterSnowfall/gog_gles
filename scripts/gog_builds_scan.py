@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.54
-@date: 08/12/2022
+@version: 3.60
+@date: 18/12/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -230,9 +230,9 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
                     if existing_delisted is None:
                         logger.debug(f'{process_tag}BQ >>> All builds for {product_id}, {os_value} have been removed...')
                         with db_lock:
-                            #also reset/clear all other attributes in order to reflect the removal;
+                            #also reset/clear all other attributes (and diff field) in order to reflect the removal;
                             #previous values will still be stored as part of the attached json payload
-                            db_cursor.execute('UPDATE gog_builds SET gb_int_removed = ?, gb_total_count = 0, gb_count = 0, '
+                            db_cursor.execute('UPDATE gog_builds SET gb_int_removed = ?, gb_int_json_diff = NULL, gb_total_count = 0, gb_count = 0, '
                                               'gb_main_version_names = NULL, gb_branch_version_names = NULL, gb_has_private_branches = 0 '
                                               'WHERE gb_int_id = ? AND gb_int_os = ?', (datetime.now(), product_id, os_value))
                             db_connection.commit()

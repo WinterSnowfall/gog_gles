@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.52
-@date: 26/11/2022
+@version: 3.60
+@date: 18/12/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -146,8 +146,16 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
                     logger.info(f'{process_tag}RQ >>> Found an existing db entry with id {release_id}. Skipping.')
                 
                 else:
-                    db_cursor.execute('SELECT gr_int_json_payload FROM gog_releases WHERE gr_external_id = ?', (release_id,))
-                    existing_json_formatted = db_cursor.fetchone()[0]
+                    db_cursor.execute('SELECT gr_int_delisted, gr_int_json_payload FROM gog_releases WHERE gr_external_id = ?', (release_id,))
+                    existing_delisted, existing_json_formatted = db_cursor.fetchone()
+                    
+                    #clear the delisted status if an id is relisted (should only happen rarely)
+                    if existing_delisted is not None:
+                        logger.debug(f'{process_tag}RQ >>> Found a previously delisted entry with id {release_id}. Removing delisted status...')
+                        with db_lock:
+                            db_cursor.execute('UPDATE gog_releases SET gr_int_delisted = NULL WHERE gr_external_id = ?', (release_id,))
+                            db_connection.commit()
+                        logger.info(f'{process_tag}RQ *** Removed delisted status for {release_id}: {release_title}.')
                     
                     if existing_json_formatted != json_formatted:
                         logger.debug(f'{process_tag}RQ >>> Existing entry for {release_id} is outdated. Updating...')
@@ -180,7 +188,9 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
             if existing_delisted is None:
                 logger.debug(f'{process_tag}RQ >>> Release with id {release_id} has been delisted...')
                 with db_lock:
-                    db_cursor.execute('UPDATE gog_releases SET gr_int_delisted = ? WHERE gr_external_id = ?', (datetime.now(), release_id))
+                    #also clear diff field when marking a release as delisted
+                    db_cursor.execute('UPDATE gog_releases SET gr_int_delisted = ?, gr_int_json_diff = NULL '
+                                      'WHERE gr_external_id = ?', (datetime.now(), release_id))
                     db_connection.commit()
                 logger.info(f'{process_tag}RQ --- Delisted the DB entry for: {release_id}: {release_title}.')
             else:
@@ -287,6 +297,7 @@ if __name__ == "__main__":
     group.add_argument('-f', '--full', help='Perform a full releases scan using the Galaxy external releases endpoint', action='store_true')
     group.add_argument('-p', '--products', help='Perform a products-based releases scan', action='store_true')
     group.add_argument('-m', '--manual', help='Perform a manual releases scan', action='store_true')
+    group.add_argument('-r', '--removed', help='Perform a scan on all the removed releases', action='store_true')
     
     args = parser.parse_args()
     
@@ -337,6 +348,8 @@ if __name__ == "__main__":
             scan_mode = 'products'
         elif args.manual:
             scan_mode = 'manual'
+        elif args.removed:
+            scan_mode = 'removed'
     
     #boolean 'true' or scan_mode specific activation
     if CONF_BACKUP == 'true' or CONF_BACKUP == scan_mode:
@@ -591,6 +604,51 @@ if __name__ == "__main__":
         except SystemExit:
             terminate_event.set()
             logger.info('Stopping manual scan...')
+            
+    elif scan_mode == 'removed':
+        logger.info('--- Running in REMOVED scan mode ---')
+        
+        try:
+            logger.info('Starting scan on all removed DB entries...')
+            
+            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+                #select all existing ids from the gog_products table which are not already present in the 
+                #gog_releases table and atempt to scan them from matching releases API entries
+                db_cursor = db_connection.execute('SELECT gr_external_id FROM gog_releases WHERE gr_int_delisted IS NOT NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all removed release ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                            sleep(sleep_interval)
+                            
+                        retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock, 
+                                                              session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                terminate_event.set()
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+        
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping removed scan...')
     
     if not terminate_event.is_set() and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')

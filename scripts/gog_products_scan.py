@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.52
-@date: 26/11/2022
+@version: 3.60
+@date: 18/12/2022
 
 Warning: Built for use with python 3.6+
 '''
@@ -487,7 +487,9 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
             if existing_delisted is None:
                 logger.debug(f'{process_tag}PQ >>> Product with id {product_id} has been delisted...')
                 with db_lock:
-                    db_cursor.execute('UPDATE gog_products SET gp_int_delisted = ? WHERE gp_id = ?', (datetime.now(), product_id))
+                    #also clear diff fields when marking a product as delisted
+                    db_cursor.execute('UPDATE gog_products SET gp_int_delisted = ?, gp_int_json_diff = NULL, gp_int_v2_json_diff = NULL '
+                                      'WHERE gp_id = ?', (datetime.now(), product_id))
                     db_connection.commit()
                 logger.warning(f'{process_tag}PQ --- Delisted the DB entry for: {product_id}: {product_title}.')
             else:
