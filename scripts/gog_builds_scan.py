@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.60
-@date: 18/12/2022
+@version: 3.62
+@date: 04/01/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -262,8 +262,8 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
         #logger.error(traceback.format_exc())
         return False
 
-def worker_process(process_tag, scan_mode, id_queue, db_lock, 
-                   config_lock, terminate_event):
+def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock, 
+                   fail_event, terminate_event):
     #catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
     #catch SIGINT and exit gracefully
@@ -300,7 +300,8 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock,
                         retry_counter += 1
                         #terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
-                            logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process.')    
+                            logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process.')
+                            fail_event.set()
                             terminate_event.set()
                 
                 if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
@@ -424,6 +425,8 @@ if __name__ == "__main__":
     ##shared process events
     terminate_event = multiprocessing.Event()
     terminate_event.clear()
+    fail_event = multiprocessing.Event()
+    fail_event.clear()
     
     if scan_mode == 'full':
         logger.info('--- Running in FULL scan mode ---')
@@ -453,8 +456,8 @@ if __name__ == "__main__":
                 process_tag_nice = ''.join(('P#', PROCESS_LOGGING_FILLER, str(process_no + 1), ' '))
                 
                 process = multiprocessing.Process(target=worker_process, 
-                                                 args=(process_tag_nice, scan_mode, id_queue, 
-                                                       db_lock, config_lock, terminate_event), 
+                                                 args=(process_tag_nice, scan_mode, id_queue, db_lock, config_lock, 
+                                                       fail_event, terminate_event), 
                                                  daemon=True)
                 process.start()
                 process_list.append(process)
@@ -545,6 +548,7 @@ if __name__ == "__main__":
                                 #terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
                                     terminate_event.set()
                     
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_event.is_set():
@@ -609,6 +613,7 @@ if __name__ == "__main__":
                                 #terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
                                     terminate_event.set()
                 
                 logger.debug('Running PRAGMA optimize...')
@@ -656,6 +661,7 @@ if __name__ == "__main__":
                                 #terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
                                     terminate_event.set()
                 
                 logger.debug('Running PRAGMA optimize...')
@@ -885,6 +891,7 @@ if __name__ == "__main__":
                                 #terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
                                     terminate_event.set()
                 
                 logger.debug('Running PRAGMA optimize...')
@@ -903,3 +910,7 @@ if __name__ == "__main__":
             configParser.write(file)
     
     logger.info('All done! Exiting...')
+    
+    #return a non-zero exit code if a scan failure was encountered
+    if terminate_event.is_set() and fail_event.is_set():
+        raise SystemExit(4)

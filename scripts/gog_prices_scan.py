@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.60
-@date: 18/12/2022
+@version: 3.62
+@date: 04/01/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -241,6 +241,7 @@ if __name__ == "__main__":
             raise SystemExit(3)
     
     terminate_signal = False
+    fail_signal = False
     
     if scan_mode == 'update':
         logger.info('--- Running in UPDATE scan mode ---')
@@ -296,6 +297,7 @@ if __name__ == "__main__":
                             #terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
+                                fail_signal = True
                                 terminate_signal = True
                     
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
@@ -355,3 +357,7 @@ if __name__ == "__main__":
             configParser.write(file)
     
     logger.info('All done! Exiting...')
+    
+    #return a non-zero exit code if a scan failure was encountered
+    if terminate_signal and fail_signal:
+        raise SystemExit(4)
