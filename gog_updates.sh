@@ -19,5 +19,7 @@ python3 gog_builds_scan.py -u
 
 python3 gog_prices_scan.py -u
 
+python3 gog_ratings_scan.py -u
+
 cd ..
 

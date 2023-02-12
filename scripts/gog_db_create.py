@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.62
-@date: 04/01/2023
+@version: 3.63
+@date: 12/02/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -76,7 +76,7 @@ CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY 
                            'gpr_int_added TEXT NOT NULL, '
                            'gpr_int_outdated TEXT, '
                            'gpr_int_id INTEGER NOT NULL, '
-                           'gpr_int_title TEXT, '
+                           'gpr_int_title TEXT NOT NULL, '
                            'gpr_int_country_code TEXT NOT NULL, '
                            'gpr_currency TEXT NOT NULL, '
                            'gpr_base_price REAL NOT NULL, '
@@ -100,7 +100,7 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_v2_features TEXT, '
                              'gp_v2_is_using_dosbox INTEGER, '
                              'gp_id INTEGER UNIQUE NOT NULL, '
-                             'gp_title TEXT, '
+                             'gp_title TEXT NOT NULL, '
                              'gp_slug TEXT NOT NULL, '
                              'gp_cs_compat_windows INTEGER NOT NULL, '
                              'gp_cs_compat_osx INTEGER NOT NULL, '
@@ -119,6 +119,21 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_description_cool TEXT, '
                              'gp_changelog TEXT)')
 
+CREATE_GOG_RATINGS_QUERY = ('CREATE TABLE gog_ratings (grt_int_nr INTEGER PRIMARY KEY, '
+                            'grt_int_added TEXT NOT NULL, '
+                            'grt_int_removed TEXT, '
+                            'grt_int_updated TEXT, '
+                            'grt_int_json_payload TEXT NOT NULL, '
+                            'grt_int_json_diff TEXT, '
+                            'grt_int_id INTEGER UNIQUE NOT NULL, '
+                            'grt_int_title TEXT NOT NULL, '
+                            'grt_review_count INTEGER NOT NULL, '
+                            'grt_avg_rating REAL NOT NULL, '
+                            'grt_avg_rating_count INTEGER NOT NULL, '
+                            'grt_avg_rating_verified_owner REAL NOT NULL, '
+                            'grt_avg_rating_verified_owner_count INTEGER NOT NULL, '
+                            'grt_is_reviewable INTEGER NOT NULL)')
+
 CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMARY KEY, '
                              'gr_int_added TEXT NOT NULL, '
                              'gr_int_delisted TEXT, '
@@ -126,7 +141,7 @@ CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMA
                              'gr_int_json_payload TEXT NOT NULL, '
                              'gr_int_json_diff TEXT, '
                              'gr_external_id INTEGER UNIQUE NOT NULL, '
-                             'gr_title TEXT, '
+                             'gr_title TEXT NOT NULL, '
                              'gr_type TEXT NOT NULL, '
                              'gr_supported_oses TEXT, '
                              'gr_genres TEXT, '
@@ -157,6 +172,7 @@ if __name__ == "__main__":
             db_cursor.execute(CREATE_GOG_PRICES_QUERY)
             db_cursor.execute('CREATE INDEX gpr_int_id_index ON gog_prices (gpr_int_id)')
             db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
+            db_cursor.execute(CREATE_GOG_RATINGS_QUERY)
             db_cursor.execute(CREATE_GOG_RELEASES_QUERY)
             db_connection.commit()
         

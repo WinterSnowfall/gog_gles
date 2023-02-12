@@ -77,7 +77,9 @@ def gog_prices_query(product_id, product_title, country_code, currencies_list, s
             if len(items) > 0:
                 logger.debug(f'PQ >>> Found something for id {product_id}...')
                 
-                db_cursor = db_connection.cursor()
+                db_cursor = db_connection.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id, ))
+                result = db_cursor.fetchone()
+                product_title = result[0]
                 
                 for json_item in items:
                     currency = json_item['currency']['code']
@@ -262,7 +264,7 @@ if __name__ == "__main__":
             logger.info('Starting full scan on all applicable DB entries...')
             
             with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-                db_cursor = db_connection.execute('SELECT gp_id, gp_title FROM gog_products WHERE gp_id > ? AND '
+                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? AND '
                                                   'gp_int_delisted IS NULL ORDER BY 1', (last_id,))
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
@@ -272,7 +274,6 @@ if __name__ == "__main__":
                 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    current_product_title = id_entry[1]
                     logger.debug(f'Now processing id {current_product_id}...')
                     retries_complete = False
                     retry_counter = 0
@@ -283,8 +284,8 @@ if __name__ == "__main__":
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {current_product_id}...')
                         
-                        retries_complete = gog_prices_query(current_product_id, current_product_title, COUNTRY_CODE, 
-                                                            CURRENCIES_LIST, session, db_connection)
+                        retries_complete = gog_prices_query(current_product_id, COUNTRY_CODE, CURRENCIES_LIST, 
+                                                            session, db_connection)
                         
                         if retries_complete:
                             if retry_counter > 0:
