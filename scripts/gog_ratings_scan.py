@@ -92,7 +92,7 @@ def gog_ratings_query(product_id, is_verified, session):
         
         return (value, count, True)
     
-        #sometimes the HTTPS connection encounters SSL errors
+    #sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'RTQ >>> Connection SSL error encountered for {product_id}.')
         return (None, None, False)
@@ -139,12 +139,28 @@ def gog_reviews_query(product_id, session, db_connection):
                 is_reviewable = json_parsed['isReviewable']
                 #get the overall ratings
                 ratings_found = False
+                ratings_retries = 0
                 while not ratings_found:
-                    avg_rating, avg_rating_count, ratings_found = gog_ratings_query(product_id, False, session)
+                    if ratings_retries > 0:
+                        logger.warning(f'RVQ >>> Ratings retry number {ratings_retries}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                        sleep(RETRY_SLEEP_INTERVAL)
+                    avg_rating, avg_rating_count, ratings_found = gog_ratings_query(product_id, False, socks5_proxy, session)
+                    if not ratings_found:
+                        ratings_retries += 1
+                    elif ratings_retries > 0:
+                        logger.info(f'RVQ >>> Successfully retried for {product_id}.')
                 #get the overall ratings for verified owners
                 ratings_found = False
+                ratings_retries = 0
                 while not ratings_found:
-                    avg_rating_verified_owner, avg_rating_verified_owner_count, ratings_found = gog_ratings_query(product_id, True, session)
+                    if ratings_retries > 0:
+                        logger.warning(f'RVQ >>> Ratings (verified owner) retry number {ratings_retries}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                        sleep(RETRY_SLEEP_INTERVAL)
+                    avg_rating_verified_owner, avg_rating_verified_owner_count, ratings_found = gog_ratings_query(product_id, True, socks5_proxy, session)
+                    if not ratings_found:
+                        ratings_retries += 1
+                    elif ratings_retries > 0:
+                        logger.info(f'RVQ >>> Successfully retried (verified owner) for {product_id}.')
                 
                 db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id,))
                 result = db_cursor.fetchone()
