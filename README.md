@@ -1,9 +1,9 @@
 # gog_gles
-A collection of scripts that call publicly available GOG APIs in order to keep track of game, installer, Galaxy builds and pricing updates.
+A collection of scripts that call publicly available GOG APIs in order to keep track of game, installer, Galaxy builds, ratings and pricing updates.
 
 ## What does gog_gles do?
 
-It provides several python3 scripts which call publicly available GOG APIs in order to collect product data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to game cards, changelogs, installers/files, Galaxy builds and prices.
+It provides several python3 scripts which call publicly available GOG APIs in order to collect product data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to game cards, changelogs, installers/files, Galaxy builds, ratings and prices.
 
 ## What do I need to do to get it running on my PC?
 
@@ -56,6 +56,12 @@ python3 gog_builds_scan.py -p
 **IMPORTANT** First make sure you've set the currency list/region you're interested in tracking by editing the *gog_prices_scan.conf* file. See the below section on pricing scans for more details.
 ```
 python3 gog_prices_scan.py -u
+```
+
+**10.** Populate initial ratings data, based on the previously collected product ids:
+
+```
+python3 gog_ratings_scan.py -u
 ```
 
 You're now good to go!
