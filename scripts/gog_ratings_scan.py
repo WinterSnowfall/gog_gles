@@ -144,7 +144,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     if ratings_retries > 0:
                         logger.warning(f'RVQ >>> Ratings retry number {ratings_retries}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                         sleep(RETRY_SLEEP_INTERVAL)
-                    avg_rating, avg_rating_count, ratings_found = gog_ratings_query(product_id, False, socks5_proxy, session)
+                    avg_rating, avg_rating_count, ratings_found = gog_ratings_query(product_id, False, session)
                     if not ratings_found:
                         ratings_retries += 1
                     elif ratings_retries > 0:
@@ -156,7 +156,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     if ratings_retries > 0:
                         logger.warning(f'RVQ >>> Ratings (verified owner) retry number {ratings_retries}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                         sleep(RETRY_SLEEP_INTERVAL)
-                    avg_rating_verified_owner, avg_rating_verified_owner_count, ratings_found = gog_ratings_query(product_id, True, socks5_proxy, session)
+                    avg_rating_verified_owner, avg_rating_verified_owner_count, ratings_found = gog_ratings_query(product_id, True, session)
                     if not ratings_found:
                         ratings_retries += 1
                     elif ratings_retries > 0:
