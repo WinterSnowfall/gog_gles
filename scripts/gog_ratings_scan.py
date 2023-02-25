@@ -311,7 +311,7 @@ if __name__ == "__main__":
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
     
-    logger.info('*** Running PRICES scan script ***')
+    logger.info('*** Running RATINGS scan script ***')
     
     #detect any parameter overrides and set the scan_mode accordingly
     if len(argv) > 1:
