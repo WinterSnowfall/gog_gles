@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.62
-@date: 04/01/2023
+@version: 3.70
+@date: 16/04/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -1145,8 +1145,6 @@ if __name__ == "__main__":
             logger.info(f'Restarting update scan from id: {last_id}.')
         
         try:
-            logger.info('Starting update scan on all existing DB entries...')
-            
             with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
                 #skip products which are no longer listed
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? '
@@ -1378,8 +1376,6 @@ if __name__ == "__main__":
         logger.info('--- Running in FILE EXTRACT scan mode ---')
         
         try:
-            logger.info('Starting files scan on all existing DB entries...')
-            
             with sqlite3.connect(db_file_path) as db_connection:
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL ORDER BY 1')
                 id_list = db_cursor.fetchall()
@@ -1402,8 +1398,6 @@ if __name__ == "__main__":
         logger.info('--- Running in DELISTED scan mode ---')
         
         try:
-            logger.info('Starting scan on all delisted DB entries...')
-            
             with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
                 #select all products which are no longer listed
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NOT NULL ORDER BY 1')

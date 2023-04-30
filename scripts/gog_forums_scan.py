@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.62
-@date: 04/01/2023
+@version: 3.70
+@date: 16/04/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -211,9 +211,9 @@ if __name__ == "__main__":
     terminate_signal = False
     fail_signal = False
     
+    logger.info('--- Running in FULL scan mode ---')
+    
     try:
-        logger.info('Starting forums scan...')
-        
         with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
             retries_complete = False
             retry_counter = 0

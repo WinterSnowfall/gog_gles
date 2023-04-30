@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.62
-@date: 04/01/2023
+@version: 3.70
+@date: 16/04/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -21,9 +21,6 @@ from matplotlib import gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.ticker import AutoMinorLocator
 from matplotlib.ticker import ScalarFormatter
-
-##global parameters init
-file_date = datetime.now().strftime('%Y%m%d')
 
 ##logging configuration block
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
@@ -65,9 +62,10 @@ def sigint_handler(signum, frame):
     
     raise SystemExit(0)
 
-def plot_id_timeline(mode, db_connection):
-    pyplot.suptitle('gog_gles - GOG product id detection timeline (with id / detection date histograms)')
-    window_title = f'gog_{mode}_{file_date}'
+def plot_id_timeline(mode, plot_date, db_connection):
+    pyplot.suptitle('gog_gles - GOG product id detection timeline '
+                   f'(with id / detection date histograms) - {plot_date}')
+    window_title = f'gog_{mode}'
     pyplot.gcf().canvas.set_window_title(window_title)
     pyplot.gcf().set_size_inches(PNG_WIDTH_INCHES, PNG_HEIGHT_INCHES)
     
@@ -155,15 +153,15 @@ def plot_id_timeline(mode, db_connection):
                     max(*game_detection_date_list, *dlc_detection_date_list, *pack_detection_date_list) + timedelta(weeks=+1))
     dist_chart.set_ylim(min_id - ID_INTERVAL_LENGTH, MAX_ID_WITH_OFFSET)
     #reduce exterior padding
-    pyplot.tight_layout(5, 1, 0)
+    pyplot.tight_layout(pad=5, h_pad=1, w_pad=0)
     
     pyplot.ioff()
     pyplot.savefig(os.path.join('..', 'output_plot', window_title + '.png'))
     #uncomment for debugging purposes only
     #pyplot.show()
 
-def plot_id_distribution(mode, db_connection):
-    window_title = f'gog_{mode}_{file_date}'
+def plot_id_distribution(mode, plot_date, db_connection):
+    window_title = f'gog_{mode}'
     pyplot.gcf().canvas.set_window_title(window_title)
     pyplot.gcf().set_size_inches(PNG_WIDTH_INCHES, PNG_HEIGHT_INCHES)
     
@@ -188,11 +186,13 @@ def plot_id_distribution(mode, db_connection):
     pack_id_list = []
     
     if mode == 'distribution':
-        pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (all ids)')
+        pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} '
+                        f'ids (all ids) - {plot_date}')
         db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_delisted IS NULL ORDER BY 1', (CUTOFF_ID,))
     else:
-        pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} ids (incremental ids)')
+        pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} '
+                        f'ids (incremental ids) - {plot_date}')
         db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_added > ? AND gp_int_delisted IS NULL ORDER BY 1',
                                           (CUTOFF_ID, CUTOFF_DATE))
@@ -221,7 +221,7 @@ def plot_id_distribution(mode, db_connection):
     #set proper limits for x axis
     pyplot.gca().set_xlim(min_id - ID_INTERVAL_LENGTH, MAX_ID_WITH_OFFSET)
     #reduce exterior padding
-    pyplot.tight_layout(5, 1, 0)
+    pyplot.tight_layout(pad=5, h_pad=1, w_pad=0)
     
     pyplot.ioff()
     pyplot.savefig(os.path.join('..', 'output_plot', window_title + '.png'))
@@ -269,13 +269,15 @@ if __name__ == "__main__":
             CHART_COLORS = FIRE_CHART_COLORS
         elif args.colors == 'darkness':
             CHART_COLORS = DARKNESS_CHART_COLORS
+            
+    date_now = datetime.now().strftime('%d/%m/%Y')
     
     if plot_mode == 'timeline':
         try:
             logger.info('--- Running in ID TIMELINE mode ---')
             
             with sqlite3.connect(db_file_path) as db_connection:
-                plot_id_timeline(plot_mode, db_connection)
+                plot_id_timeline(plot_mode, date_now, db_connection)
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -288,7 +290,7 @@ if __name__ == "__main__":
             logger.info('--- Running in ID DISTRIBUTION mode (all) ---')
             
             with sqlite3.connect(db_file_path) as db_connection:
-                plot_id_distribution(plot_mode, db_connection)
+                plot_id_distribution(plot_mode, date_now, db_connection)
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -301,7 +303,7 @@ if __name__ == "__main__":
             logger.info('--- Running in ID DISTRIBUTION mode (incremental) ---')
             
             with sqlite3.connect(db_file_path) as db_connection:
-                plot_id_distribution(plot_mode, db_connection)
+                plot_id_distribution(plot_mode, date_now, db_connection)
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
