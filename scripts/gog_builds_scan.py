@@ -687,10 +687,11 @@ if __name__ == "__main__":
         
         try:
             with sqlite3.connect(db_file_path) as db_connection:
-                #select all existing ids from the gog_builds table (with valid builds) that are also present in the gog_products table
+                #select all existing ids from the gog_builds table (with valid builds) that are also present in the gog_files table
                 db_cursor = db_connection.execute('SELECT gb_int_id, gb_int_os, gb_int_title, gb_main_version_names FROM gog_builds '
-                                                  'WHERE gb_main_version_names IS NOT NULL AND '
-                                                  'gb_int_id IN (SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
+                                                  'WHERE gb_main_version_names IS NOT NULL AND gb_int_id IN '
+                                                  '(SELECT DISTINCT gf_int_id FROM gog_files WHERE gf_int_removed IS NULL ORDER BY 1)'
+                                                  ' ORDER BY 1')
                 delta_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
                 
@@ -813,9 +814,9 @@ if __name__ == "__main__":
                                     logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os_value}.')
                                     
                                     if current_false_positive:
-                                        #any update to a discrepancy should reset the false positive state of an entry and clear out the reason
-                                        db_cursor.execute('UPDATE gog_installers_delta SET gid_int_false_positive = 0, '
-                                                          'gid_int_false_positive_reason = NULL '
+                                        #any update to a discrepancy should reset the false positive state of an entry, 
+                                        #but leave the false positive reason in place for tracking purposes
+                                        db_cursor.execute('UPDATE gog_installers_delta SET gid_int_false_positive = 0 '
                                                           'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL',
                                                           (current_product_id, current_os_value))
                                         db_connection.commit()
