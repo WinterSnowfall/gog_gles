@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.70
-@date: 16/04/2023
+@version: 3.72
+@date: 06/05/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -50,15 +50,21 @@ db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
 INSERT_BUILD_QUERY = 'INSERT INTO gog_builds VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 UPDATE_BUILD_QUERY = ('UPDATE gog_builds SET gb_int_updated = ?, '
-                        'gb_int_json_payload = ?, '
-                        'gb_int_json_diff = ?, '
-                        'gb_total_count = ?, '
-                        'gb_count = ?, '
-                        'gb_main_version_names = ?, '
-                        'gb_branch_version_names = ?, '
-                        'gb_has_private_branches = ? WHERE gb_int_id = ? AND gb_int_os = ?')
+                      'gb_int_json_payload = ?, '
+                      'gb_int_json_diff = ?, '
+                      'gb_total_count = ?, '
+                      'gb_count = ?, '
+                      'gb_main_version_names = ?, '
+                      'gb_branch_version_names = ?, '
+                      'gb_has_private_branches = ? '
+                      'WHERE gb_int_id = ? AND gb_int_os = ?')
 
-INSERT_INSTALLERS_DELTA_QUERY = 'INSERT INTO gog_installers_delta VALUES (?,?,?,?,?,?,?,?,?,?)'
+INSERT_INSTALLERS_DELTA_QUERY = 'INSERT INTO gog_installers_delta VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+
+UPDATE_INSTALLERS_DELTA_QUERY = ('UPDATE gog_installers_delta SET gid_int_updated = ?. ' 
+                                 'gid_int_latest_galaxy_build = ?, '
+                                 'gid_int_latest_installer_version = ? '
+                                 'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL')
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
 
@@ -799,24 +805,28 @@ if __name__ == "__main__":
                                     logger.debug(f'Discrepancy already logged for {current_product_id}: {current_product_title}, {current_os_value}. Skipping.')
                                 else:
                                     logger.debug(f'Found outdated discrepancy for {current_product_id}: {current_product_title}, {current_os_value}.')
-                                    
-                                    if current_false_positive:
-                                        #any updates to a discrepancy should reset the false positive state of an entry
-                                        current_false_positive = False
-                                        logger.warning(f'False positive status has been reset for {current_product_id}, {current_os_value}.')
-                                    
-                                    db_cursor.execute('UPDATE gog_installers_delta SET gid_int_latest_galaxy_build = ?, gid_int_latest_installer_version = ?, '
-                                                      'gid_int_false_positive = ? WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL', 
-                                                      (current_latest_build_version_orig, current_latest_file_version_orig, 
-                                                       current_false_positive, current_product_id, current_os_value))
+                                    #gid_int_updated, gid_int_latest_galaxy_build, 
+                                    #gid_int_latest_installer_version, gid_int_id, gid_int_os
+                                    db_cursor.execute(UPDATE_INSTALLERS_DELTA_QUERY, (datetime.now(), current_latest_build_version_orig, 
+                                                                                      current_latest_file_version_orig, current_product_id, current_os_value))
                                     db_connection.commit()
                                     logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os_value}.')
+                                    
+                                    if current_false_positive:
+                                        #any update to a discrepancy should reset the false positive state of an entry and clear out the reason
+                                        db_cursor.execute('UPDATE gog_installers_delta SET gid_int_false_positive = 0, '
+                                                          'gid_int_false_positive_reason = NULL '
+                                                          'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL',
+                                                          (current_product_id, current_os_value))
+                                        db_connection.commit()
+                                        logger.warning(f'False positive status has been reset for {current_product_id}, {current_os_value}.')
+                            
                             else:
                                 logger.debug(f'Found new discrepancy for {current_product_id}: {current_product_title}, {current_os_value}.')
-                                #gid_int_nr, gid_int_added, gid_int_fixed, gid_int_id, gid_int_title, 
+                                #gid_int_nr, gid_int_added, gid_int_fixed, gid_int_updated, gid_int_id, gid_int_title, 
                                 #gid_int_os, gid_int_latest_galaxy_build, gid_int_latest_installer_version, 
                                 #gid_int_false_positive, gid_int_false_positive_reason
-                                db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now(), None, current_product_id, current_product_title, 
+                                db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now(), None, None, current_product_id, current_product_title, 
                                                                                   current_os_value, current_latest_build_version_orig, current_latest_file_version_orig, 
                                                                                   current_false_positive, None))
                                 db_connection.commit()

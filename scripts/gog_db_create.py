@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.70
-@date: 16/04/2023
+@version: 3.72
+@date: 06/05/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -64,6 +64,7 @@ CREATE_GOG_FORUMS_QUERY = ('CREATE TABLE gog_forums (gfr_int_nr INTEGER PRIMARY 
 CREATE_GOG_INSTALLERS_DELTA_QUERY = ('CREATE TABLE gog_installers_delta (gid_int_nr INTEGER PRIMARY KEY, '
                                      'gid_int_added TEXT NOT NULL, '
                                      'gid_int_fixed TEXT, '
+                                     'gid_int_updated TEXT, '
                                      'gid_int_id INTEGER NOT NULL, '
                                      'gid_int_title TEXT NOT NULL, '
                                      'gid_int_os TEXT NOT NULL, '
