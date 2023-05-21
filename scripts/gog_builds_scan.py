@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.72
-@date: 06/05/2023
+@version: 3.73
+@date: 20/05/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -61,7 +61,7 @@ UPDATE_BUILD_QUERY = ('UPDATE gog_builds SET gb_int_updated = ?, '
 
 INSERT_INSTALLERS_DELTA_QUERY = 'INSERT INTO gog_installers_delta VALUES (?,?,?,?,?,?,?,?,?,?,?)'
 
-UPDATE_INSTALLERS_DELTA_QUERY = ('UPDATE gog_installers_delta SET gid_int_updated = ?. ' 
+UPDATE_INSTALLERS_DELTA_QUERY = ('UPDATE gog_installers_delta SET gid_int_updated = ?, ' 
                                  'gid_int_latest_galaxy_build = ?, '
                                  'gid_int_latest_installer_version = ? '
                                  'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL')
