@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.70
-@date: 16/04/2023
+@version: 3.73
+@date: 20/05/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -92,7 +92,7 @@ OPTIMIZE_QUERY = 'PRAGMA optimize'
 #number of retries after which an id is considered parmenently delisted (for archive mode)
 ARCHIVE_NO_OF_RETRIES = 3
 #static regex pattern for endline fixing of extra description/changelog whitespace
-ENDLINE_FIX_REGEX = re.compile('([ ]*[\n]){2,}')
+ENDLINE_FIX_REGEX = re.compile(r'([ ]*[\n]){2,}')
 #value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
 #number of seconds a process will wait to get/put in a queue

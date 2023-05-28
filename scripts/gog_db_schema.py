@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.72
-@date: 06/05/2023
+@version: 3.73
+@date: 20/05/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -11,6 +11,7 @@ import sqlite3
 import logging
 import argparse
 import os
+from sys import argv
 
 ##logging configuration block
 logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
@@ -152,31 +153,65 @@ CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMA
                              'gr_aggregated_rating REAL)')
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=('GOG DB create (part of gog_gles) - a script to create the sqlite DB structure '
-                                                  'for the other gog_gles utilities.'))
+    parser = argparse.ArgumentParser(description=('GOG DB schema (part of gog_gles) - a script to create the sqlite DB structure '
+                                                  'for the other gog_gles utilities and maintain it.'))
+    
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-c', '--create', help='Create the GOG DB and schema', action='store_true')
+    group.add_argument('-v', '--vacuum', help='Vacuum (compact) the GOG DB', action='store_true')
     
     args = parser.parse_args()
     
-    #db file check/creation section
-    if not os.path.exists(db_file_path):
-        logger.info('No DB file detected. Creating new SQLite DB...')
+    #set default operation mode
+    db_mode = 'create';
+    
+    #detect any parameter overrides and set the scan_mode accordingly
+    if len(argv) > 1:
+        logger.info('Command-line parameter mode override detected.')
         
-        with sqlite3.connect(db_file_path) as db_connection:
-            db_cursor = db_connection.cursor()
-            db_cursor.execute(CREATE_GOG_BUILDS_QUERY)
-            db_cursor.execute('CREATE UNIQUE INDEX gb_int_id_os_index ON gog_builds (gb_int_id, gb_int_os)')
-            db_cursor.execute(CREATE_GOG_FILES_QUERY)
-            db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
-            db_cursor.execute(CREATE_GOG_FORUMS_QUERY)
-            db_cursor.execute(CREATE_GOG_INSTALLERS_DELTA_QUERY)
-            db_cursor.execute('CREATE INDEX gid_int_id_os_index ON gog_installers_delta (gid_int_id, gid_int_os)')
-            db_cursor.execute(CREATE_GOG_PRICES_QUERY)
-            db_cursor.execute('CREATE INDEX gpr_int_id_index ON gog_prices (gpr_int_id)')
-            db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
-            db_cursor.execute(CREATE_GOG_RATINGS_QUERY)
-            db_cursor.execute(CREATE_GOG_RELEASES_QUERY)
-            db_connection.commit()
+        if args.create:
+            db_mode = 'create'
+        elif args.vacuum:
+            db_mode = 'vacuum'
+    
+    if db_mode == 'create':
+        logger.info('--- Running in CREATE DB mode ---')
         
-        logger.info('DB created successfully.')
-    else:
-        logger.error('Existing DB file detected. Please delete the existing file if you are attempting to recreate the DB!')
+        #db file check/creation section
+        if not os.path.exists(db_file_path):
+            logger.info('No DB file detected. Creating new SQLite DB...')
+            
+            with sqlite3.connect(db_file_path) as db_connection:
+                db_cursor = db_connection.cursor()
+                db_cursor.execute(CREATE_GOG_BUILDS_QUERY)
+                db_cursor.execute('CREATE UNIQUE INDEX gb_int_id_os_index ON gog_builds (gb_int_id, gb_int_os)')
+                db_cursor.execute(CREATE_GOG_FILES_QUERY)
+                db_cursor.execute('CREATE INDEX gf_int_id_index ON gog_files (gf_int_id)')
+                db_cursor.execute(CREATE_GOG_FORUMS_QUERY)
+                db_cursor.execute(CREATE_GOG_INSTALLERS_DELTA_QUERY)
+                db_cursor.execute('CREATE INDEX gid_int_id_os_index ON gog_installers_delta (gid_int_id, gid_int_os)')
+                db_cursor.execute(CREATE_GOG_PRICES_QUERY)
+                db_cursor.execute('CREATE INDEX gpr_int_id_index ON gog_prices (gpr_int_id)')
+                db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
+                db_cursor.execute(CREATE_GOG_RATINGS_QUERY)
+                db_cursor.execute(CREATE_GOG_RELEASES_QUERY)
+                db_connection.commit()
+            
+            logger.info('DB created successfully.')
+        else:
+            logger.error('Existing DB file detected. Please delete the existing file if you are attempting to recreate the DB!')
+
+    elif db_mode == 'vacuum':
+        logger.info('--- Running in VACUUM DB mode ---')
+        
+        if os.path.exists(db_file_path):
+            logger.info('DB file detected. Vacuuming the DB...')
+            
+            with sqlite3.connect(db_file_path) as db_connection:
+                db_cursor = db_connection.cursor()
+                db_cursor.execute('VACUUM')
+                db_connection.commit()
+                
+            logger.info('Vacuuming completed.')
+        else:
+            logger.error('No DB file detected. Nothing to Vacuum!')

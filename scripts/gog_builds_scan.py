@@ -679,9 +679,9 @@ if __name__ == "__main__":
         #strip any punctuation or other grouping characters from builds/versions
         STRIP_OUT_LIST = [' ', ',', '.', '-', '_', '[', ']', '(', ')', '{', '}', '/', '\\']
         #static regex pattern for removing end-of-string RC identifier from builds/installers
-        GOG_RC_REMOVAL_REGEX = re.compile('RC[0-9]{1}$')
+        GOG_RC_REMOVAL_REGEX = re.compile(r'RC[0-9]{1}$')
         #static regex pattern for removing end-of-string GOG version strings from builds/installers
-        GOG_VERSION_REMOVAL_REGEX = re.compile('GOG[0-9]{0,5}$')
+        GOG_VERSION_REMOVAL_REGEX = re.compile(r'GOG[0-9]{0,5}$')
         
         detected_discrepancies = {'windows': [], 'osx': []}
         
