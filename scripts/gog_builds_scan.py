@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.73
-@date: 20/05/2023
+@version: 3.74
+@date: 04/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -631,6 +631,11 @@ if __name__ == "__main__":
         manual_scan_section = configParser['MANUAL_SCAN']
         #load the product id list to process
         id_list = manual_scan_section.get('id_list')
+        
+        if id_list == '':
+            logger.warning('Nothing to scan!')
+            raise SystemExit(0)
+        
         try:
             id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
         except ValueError:
@@ -918,4 +923,4 @@ if __name__ == "__main__":
     
     #return a non-zero exit code if a scan failure was encountered
     if terminate_event.is_set() and fail_event.is_set():
-        raise SystemExit(4)
+        raise SystemExit(5)

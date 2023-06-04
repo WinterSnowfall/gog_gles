@@ -165,7 +165,7 @@ if __name__ == "__main__":
     #set default operation mode
     db_mode = 'create';
     
-    #detect any parameter overrides and set the scan_mode accordingly
+    #detect any parameter overrides and set the db_mode accordingly
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
         
