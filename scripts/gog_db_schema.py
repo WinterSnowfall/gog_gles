@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.73
-@date: 20/05/2023
+@version: 3.80
+@date: 12/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,18 +13,18 @@ import argparse
 import os
 from sys import argv
 
-##logging configuration block
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-#logging level for other modules
-logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+# logging configuration block
+LOGGER_FORMAT = '%(asctime)s %(levelname)s >>> %(message)s'
+# logging level for other modules
+logging.basicConfig(format=LOGGER_FORMAT, level=logging.ERROR)
 logger = logging.getLogger(__name__)
-#logging level for current logger
-logger.setLevel(logging.INFO) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+# logging level for current logger
+logger.setLevel(logging.INFO) # DEBUG, INFO, WARNING, ERROR, CRITICAL
 
-##db configuration block
-db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
+# db configuration block
+DB_FILE_PATH = os.path.join('..', 'output_db', 'gog_gles.db')
 
-##CONSTANTS
+# CONSTANTS
 CREATE_GOG_BUILDS_QUERY = ('CREATE TABLE gog_builds (gb_int_nr INTEGER PRIMARY KEY, '
                            'gb_int_added TEXT NOT NULL, '
                            'gb_int_removed TEXT, '
@@ -93,29 +93,30 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_int_v2_updated TEXT, '
                              'gp_int_v2_json_payload TEXT, '
                              'gp_int_v2_json_diff TEXT, '
-                             'gp_int_is_movie INTEGER NOT NULL, '
+                             'gp_id INTEGER UNIQUE NOT NULL, '
+                             'gp_title TEXT NOT NULL, '
+                             'gp_game_type TEXT NOT NULL, '
                              'gp_v2_developer TEXT, '
                              'gp_v2_publisher TEXT, '
+                             'gp_v2_size INTEGER NOT NULL, '
+                             'gp_v2_is_preorder INTEGER NOT NULL, '
+                             'gp_v2_in_development INTEGER NOT NULL, '
+                             'gp_v2_is_installable INTEGER NOT NULL, '
+                             'gp_v2_os_support_windows INTEGER NOT NULL, '
+                             'gp_v2_os_support_linux INTEGER NOT NULL, '
+                             'gp_v2_os_support_osx INTEGER NOT NULL, '
+                             'gp_v2_supported_os_versions TEXT, '
+                             'gp_v2_global_release_date TEXT, '
+                             'gp_v2_gog_release_date TEXT, '
                              'gp_v2_tags TEXT, '
                              'gp_v2_properties TEXT, '
                              'gp_v2_series TEXT, '
                              'gp_v2_features TEXT, '
-                             'gp_v2_is_using_dosbox INTEGER, '
-                             'gp_id INTEGER UNIQUE NOT NULL, '
-                             'gp_title TEXT NOT NULL, '
-                             'gp_slug TEXT NOT NULL, '
-                             'gp_cs_compat_windows INTEGER NOT NULL, '
-                             'gp_cs_compat_osx INTEGER NOT NULL, '
-                             'gp_cs_compat_linux INTEGER NOT NULL, '
-                             'gp_languages TEXT, '
+                             'gp_v2_is_using_dosbox INTEGER NOT NULL, '
                              'gp_links_forum TEXT, '
                              'gp_links_product_card TEXT, '
                              'gp_links_support TEXT, '
-                             'gp_in_development INTEGER NOT NULL, '
-                             'gp_is_installable INTEGER NOT NULL, '
-                             'gp_game_type TEXT NOT NULL, '
-                             'gp_is_pre_order INTEGER NOT NULL, '
-                             'gp_release_date TEXT, '
+                             'gp_languages TEXT, '
                              'gp_description_lead TEXT, '
                              'gp_description_full TEXT, '
                              'gp_description_cool TEXT, '
@@ -162,10 +163,10 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    #set default operation mode
+    # set default operation mode
     db_mode = 'create';
     
-    #detect any parameter overrides and set the db_mode accordingly
+    # detect any parameter overrides and set the db_mode accordingly
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
         
@@ -177,11 +178,10 @@ if __name__ == "__main__":
     if db_mode == 'create':
         logger.info('--- Running in CREATE DB mode ---')
         
-        #db file check/creation section
-        if not os.path.exists(db_file_path):
+        if not os.path.exists(DB_FILE_PATH):
             logger.info('No DB file detected. Creating new SQLite DB...')
             
-            with sqlite3.connect(db_file_path) as db_connection:
+            with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.cursor()
                 db_cursor.execute(CREATE_GOG_BUILDS_QUERY)
                 db_cursor.execute('CREATE UNIQUE INDEX gb_int_id_os_index ON gog_builds (gb_int_id, gb_int_os)')
@@ -204,10 +204,10 @@ if __name__ == "__main__":
     elif db_mode == 'vacuum':
         logger.info('--- Running in VACUUM DB mode ---')
         
-        if os.path.exists(db_file_path):
+        if os.path.exists(DB_FILE_PATH):
             logger.info('DB file detected. Vacuuming the DB...')
             
-            with sqlite3.connect(db_file_path) as db_connection:
+            with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.cursor()
                 db_cursor.execute('VACUUM')
                 db_connection.commit()

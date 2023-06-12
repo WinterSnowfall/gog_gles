@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.74
-@date: 04/06/2023
+@version: 3.80
+@date: 12/06/2023
 
 Warning: Built for use with python 3.6+
 '''
 
 import json
-import html
 import multiprocessing
 import queue
 import sqlite3
@@ -26,49 +25,40 @@ from html2text import html2text
 from datetime import datetime
 from time import sleep
 from collections import OrderedDict
-from lxml import html as lhtml
 from logging.handlers import RotatingFileHandler
-#uncomment for debugging purposes only
+# uncomment for debugging purposes only
 #import traceback
 
-##conf file block
-conf_file_path = os.path.join('..', 'conf', 'gog_products_scan.conf')
+# conf file block
+CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_products_scan.conf')
 
-##logging configuration block
-log_file_path = os.path.join('..', 'logs', 'gog_products_scan.log')
-logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=25165824, backupCount=1, encoding='utf-8')
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-logger_file_handler.setFormatter(logging.Formatter(logger_format))
-#logging level for other modules
-logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+# logging configuration block
+LOG_FILE_PATH = os.path.join('..', 'logs', 'gog_products_scan.log')
+logger_file_handler = RotatingFileHandler(LOG_FILE_PATH, maxBytes=25165824, backupCount=1, encoding='utf-8')
+LOGGER_FORMAT = '%(asctime)s %(levelname)s >>> %(message)s'
+logger_file_handler.setFormatter(logging.Formatter(LOGGER_FORMAT))
+# logging level for other modules
+logging.basicConfig(format=LOGGER_FORMAT, level=logging.ERROR)
 logger = logging.getLogger(__name__)
-#logging level defaults to INFO, but can be later modified through config file values
-logger.setLevel(logging.INFO)
+# logging level defaults to INFO, but can be later modified through config file values
+logger.setLevel(logging.INFO) # DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
-##db configuration block
-db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
+# db configuration block
+DB_FILE_PATH = os.path.join('..', 'output_db', 'gog_gles.db')
 
-##CONSTANTS
-INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+# CONSTANTS
+INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
                    'gp_int_json_payload = ?, '
                    'gp_int_json_diff = ?, '
                    'gp_title = ?, '
-                   'gp_slug = ?, '
-                   'gp_cs_compat_windows = ?, '
-                   'gp_cs_compat_osx = ?, '
-                   'gp_cs_compat_linux = ?, '
-                   'gp_languages = ?, '
+                   'gp_game_type = ?, '
                    'gp_links_forum = ?, '
                    'gp_links_product_card = ?, '
                    'gp_links_support = ?, '
-                   'gp_in_development = ?, '
-                   'gp_is_installable = ?, '
-                   'gp_game_type = ?, '
-                   'gp_is_pre_order = ?, '
-                   'gp_release_date = ?, '
+                   'gp_languages = ?, '
                    'gp_description_lead = ?, '
                    'gp_description_full = ?, '
                    'gp_description_cool = ?, '
@@ -79,6 +69,16 @@ UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_int_v2_json_diff = ?, '
                       'gp_v2_developer = ?, '
                       'gp_v2_publisher = ?, '
+                      'gp_v2_size = ?, '
+                      'gp_v2_is_preorder = ?, '
+                      'gp_v2_in_development = ?, '
+                      'gp_v2_is_installable = ?, '
+                      'gp_v2_os_support_windows = ?, '
+                      'gp_v2_os_support_linux = ?, '
+                      'gp_v2_os_support_osx = ?, '
+                      'gp_v2_supported_os_versions = ?, '
+                      'gp_v2_global_release_date = ?, '
+                      'gp_v2_gog_release_date = ?, '
                       'gp_v2_tags = ?, '
                       'gp_v2_properties = ?, '
                       'gp_v2_series = ?, '
@@ -89,25 +89,27 @@ INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
 
 OPTIMIZE_QUERY = 'PRAGMA optimize'
 
-#number of retries after which an id is considered parmenently delisted (for archive mode)
+# number of retries after which an id is considered parmenently delisted (for archive mode)
 ARCHIVE_NO_OF_RETRIES = 3
-#static regex pattern for endline fixing of extra description/changelog whitespace
+# static regex pattern for endline fixing of extra description/changelog whitespace
 ENDLINE_FIX_REGEX = re.compile(r'([ ]*[\n]){2,}')
-#value separator for multi-valued fields
+# value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
-#number of seconds a process will wait to get/put in a queue
+# supported product OSes, as returned by the v2 API endpoint
+SUPPORTED_OSES = ('windows', 'linux', 'osx')
+# number of seconds a process will wait to get/put in a queue
 QUEUE_WAIT_TIMEOUT = 10 #seconds
-#allow a process to fully load before starting the next process 
-#(helps preserve process start order)
+# allow a process to fully load before starting the next process 
+# (helps preserve process start order)
 PROCESS_START_WAIT_INTERVAL = 0.1 #seconds
 HTTP_OK = 200
-#non-standard unicode values (either encoded or not) which need to be purged from the JSON API output;
-#the state of being encoded or not encoded in the original text output seems to depend on some form 
-#of unicode string black magic that I can't quite understand...
+# non-standard unicode values (either encoded or not) which need to be purged from the JSON API output;
+# the state of being encoded or not encoded in the original text output seems to depend on some form 
+# of unicode string black magic that I can't quite understand...
 JSON_UNICODE_FILTERED_VALUES = ('', '\\u0092', '\\u0093', '\\u0094', '\\u0097')
 
 def sigterm_handler(signum, frame):
-    #exceptions may happen here as well due to logger syncronization mayhem on shutdown
+    # exceptions may happen here as well due to logger syncronization mayhem on shutdown
     try:
         logger.debug('Stopping scan due to SIGTERM...')
     except:
@@ -116,91 +118,13 @@ def sigterm_handler(signum, frame):
     raise SystemExit(0)
 
 def sigint_handler(signum, frame):
-    #exceptions may happen here as well due to logger syncronization mayhem on shutdown
+    # exceptions may happen here as well due to logger syncronization mayhem on shutdown
     try:
         logger.debug('Stopping scan due to SIGINT...')
     except:
         pass
     
     raise SystemExit(0)
-
-#fallback path for movies, which scrapes the product page (regular ids will scrape developer/publisher info from the v2 call)
-def gog_product_company_query(process_tag, product_id, db_lock, session, db_connection, product_url):
-    
-    logger.debug(f'{process_tag}CQ >>> Querying url: {product_url}.')
-    
-    try:
-        #set the gog_lc cookie to avoid errors bought about by GOG dynamically determining language
-        response = session.get(product_url, cookies={'gog_lc': 'BE_EUR_en-US'}, timeout=HTTP_TIMEOUT)
-        
-        logger.debug(f'{process_tag}CQ >>> HTTP response code: {response.status_code}.')
-        
-        if response.status_code == HTTP_OK:
-            logger.debug(f'{process_tag}CQ >>> HTTP response URL: {response.url}.')
-            
-            #check if the response URL remained identical to the provided product URL
-            if response.url == product_url:
-                logger.debug(f'{process_tag}CQ >>> Product company query for id {product_id} has returned a valid response...')
-                
-                html_tree = lhtml.fromstring(response.text)
-                parent_divs = html_tree.xpath('//div[contains(@class, "table__row")]/div[contains(@class, "details__category") '
-                                              'and contains(@class, "table__row-label")]/text()')
-                #strip any detected values to fix occasional GOG paging whitespace
-                parent_divs = [item.strip() for item in parent_divs]
-                logger.debug(f'{process_tag}CQ >>> Found parent elements value: {parent_divs}.')
-                
-                #check if the 'Company:' tag is present among the parent divs
-                if 'Company:' in parent_divs:
-                    developer_raw = html_tree.xpath('//div[contains(@class, "details__content") and contains(@class, "table__row-content")]'
-                                                    '/a[@class="details__link" and contains(@gog-track-event, "eventLabel: \'Developer:")]/text()')[0]
-                    logger.debug(f'{process_tag}CQ >>> Found developer raw value: {developer_raw}.')
-                    #unescape any potentially remanent HTML notations such as '&amp;'
-                    developer = html.unescape(developer_raw.strip())
-                    if developer == '': developer = None
-                    
-                    publisher_raw = html_tree.xpath('//div[contains(@class, "details__content") and contains(@class, "table__row-content")]'
-                                                    '/a[@class="details__link" and contains(@gog-track-event, "eventLabel: \'Publisher:")]/text()')[0]
-                    logger.debug(f'{process_tag}CQ >>> Found publisher raw value: {publisher_raw}.')
-                    #unescape any potentially remanent HTML notations such as '&amp;'
-                    publisher = html.unescape(publisher_raw.strip())
-                    if publisher == '': publisher = None
-                    
-                    db_cursor = db_connection.execute('SELECT gp_v2_developer, gp_v2_publisher, gp_title FROM gog_products '
-                                                      'WHERE gp_id = ?', (product_id,))
-                    existing_developer, existing_publisher, product_title = db_cursor.fetchone()
-                    
-                    if existing_developer != developer or existing_publisher != publisher:
-                        if developer is not None and publisher is not None:
-                            logger.debug(f'{process_tag}CQ >>> Developer/publisher are outdated for {product_id}. Updating...')
-                            with db_lock:
-                                db_cursor.execute('UPDATE gog_products SET gp_v2_developer = ?, gp_v2_publisher = ? WHERE gp_id = ?', 
-                                                  (developer, publisher, product_id))
-                                db_connection.commit()
-                            logger.info(f'{process_tag}CQ %%% Successfully updated developer/publisher for {product_id}: {product_title}.')
-                        else:
-                            logger.warning(f'{process_tag}CQ >>> Null developer/publisher values returned for {product_id}. Keeping existing values...')
-                
-                else:
-                    logger.debug(f'{process_tag}CQ >>> Unable to find a valid company div section. Perhaps the product is no longer being sold?')
-            
-            #invalid product URLs will redirect to the GOG games page
-            else:
-                logger.debug(f'{process_tag}CQ >>> Product URL has been redirected to the GOG games page. Perhaps the product is no longer being sold?')
-        
-        else:
-            logger.warning(f'{process_tag}CQ >>> HTTP error code {response.status_code} received for {product_id}.')
-            raise Exception()
-    
-    #sometimes the connection may time out
-    except requests.Timeout:
-        logger.warning(f'{process_tag}CQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
-        raise
-    
-    except:
-        logger.debug(f'{process_tag}CQ >>> Product company query has failed for {product_id}.')
-        #uncomment for debugging purposes only
-        #logger.error(traceback.format_exc())
-        raise
 
 def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection):
     
@@ -214,9 +138,9 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
         if response.status_code == HTTP_OK:
             logger.debug(f'{process_tag}2Q >>> Product v2 query for id {product_id} has returned a valid response...')
             
-            #ignore unicode control characters which can be part of game descriptions and/or changelogs; 
-            #these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes 
-            #even with unicode conversions from and to the db... why do you do this, GOG, why???
+            # ignore unicode control characters which can be part of game descriptions and/or changelogs; 
+            # these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes 
+            # even with unicode conversions from and to the db... why do you do this, GOG, why???
             filtered_response = response.text
             for unicode_value in JSON_UNICODE_FILTERED_VALUES:
                 filtered_response = filtered_response.replace(unicode_value, '')
@@ -231,48 +155,86 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 if existing_v2_json_formatted is not None:
                     logger.debug(f'{process_tag}2Q >>> Existing v2 data for {product_id} is outdated. Updating...')
                 
-                #calculate the diff between the new json and the previous one
-                #(applying the diff on the new json will revert to the previous version)
+                # calculate the diff between the new json and the previous one
+                # (applying the diff on the new json will revert to the previous version)
                 if existing_v2_json_formatted is not None:
                     diff_v2_formatted = ''.join([line for line in difflib.unified_diff(json_v2_formatted.splitlines(1), 
                                                                                        existing_v2_json_formatted.splitlines(1), n=0)])
                 else:
                     diff_v2_formatted = None
                 
-                #process product title (for loggers)
+                # process product title (for loggers)
                 product_title = json_v2_parsed['_embedded']['product']['title'].strip()
-                #process developer/publisher
+                # process developer/publisher
                 developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
                 publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
-                #process tags
+                # process size (MB value)
+                size = json_v2_parsed['size']
+                # process preorder status
+                is_preorder = json_v2_parsed['_embedded']['product']['isPreorder']
+                # process in development status
+                in_development = json_v2_parsed['inDevelopment']['active']
+                # process installable status
+                is_installable = json_v2_parsed['_embedded']['product']['isInstallable']
+                # process individual os support
+                supported_oses = json_v2_parsed['_embedded']['supportedOperatingSystems']
+                os_support_windows = False
+                os_support_linux = False
+                os_support_osx = False
+                for os_value in supported_oses:
+                    if os_value['operatingSystem']['name'] == SUPPORTED_OSES[0]:
+                        os_support_windows = True
+                    elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[1]:
+                        os_support_linux = True
+                    elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[2]:
+                        os_support_osx = True
+                # process supported os versions
+                supported_os_versions = MVF_VALUE_SEPARATOR.join(os_value['operatingSystem']['versions'] for os_value in supported_oses 
+                                                                 #some ids have empty versions strings for certain oses...
+                                                                 if os_value['operatingSystem']['versions'] != '')
+                # process global release date
+                try:
+                    global_release_date = json_v2_parsed['_embedded']['product']['globalReleaseDate']
+                except KeyError:
+                    global_release_date = None
+                # process GOG release date
+                gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate']
+                # process tags
                 tags = MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
                 if tags == '': tags = None
-                #process properties (tee is used for avoiding a reserved name) - the field may be absent and return a KeyError
+                # process properties (tee is used for avoiding a reserved name) - the field may be absent and return a KeyError
                 try:
-                    #ideally should not need a strip, but there are a few entries with extra whitespace here and there
+                    # ideally should not need a strip, but there are a few entries with extra whitespace here and there
                     properties = MVF_VALUE_SEPARATOR.join(sorted([propertee['name'].strip() for propertee in 
                                                                   json_v2_parsed['_embedded']['properties']]))
                     if properties == '': properties = None
                 except KeyError:
                     properties = None
-                #process series - these may be 'null' and return a TypeError
+                # process series - these may be 'null' and return a TypeError
                 try:
                     series = json_v2_parsed['_embedded']['series']['name'].strip()
                 except TypeError:
                     series = None
-                #process features
+                # process features
                 features = MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
                 if features == '': features = None
-                #process is_using_dosbox
+                # process is_using_dosbox
                 is_using_dosbox = json_v2_parsed['isUsingDosBox']
                 
                 with db_lock:
-                    #remove title from the first position in values_formatted and add the id at the end
-                    #gp_int_v2_latest_update, gp_int_v2_json_payload, gp_int_v2_previous_json_diff,
-                    #gp_v2_developer, gp_v2_publisher, gp_v2_tags, gp_v2_properties, gp_vs_series,
-                    #gp_v2_features, gp_v2_is_using_dosbox, gp_id (WHERE clause)
+                    # gp_int_v2_updated, gp_int_v2_json_payload, gp_int_v2_previous_json_diff,
+                    # gp_v2_developer, gp_v2_publisher, gp_v2_size,
+                    # gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable, 
+                    # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx, 
+                    # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
+                    # gp_v2_tags, gp_v2_properties, gp_vs_series,
+                    # gp_v2_features, gp_v2_is_using_dosbox, gp_id (WHERE clause)
                     db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now(), json_v2_formatted, diff_v2_formatted, 
-                                                           developer, publisher, tags, properties, series, 
+                                                           developer, publisher, size,
+                                                           is_preorder, in_development, is_installable,
+                                                           os_support_windows, os_support_linux, os_support_osx, 
+                                                           supported_os_versions, global_release_date, gog_release_date, 
+                                                           tags, properties, series, 
                                                            features, is_using_dosbox, product_id))
                     db_connection.commit()
                 
@@ -281,7 +243,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 else:
                     logger.info(f'{process_tag}2Q +++ Added v2 data for {product_id}: {product_title}.')
         
-        #ids corresponding to movies will return a 404 error, others should not
+        # ids corresponding to movies will return a 404 error, others should not
         elif response.status_code == 404:
             logger.warning(f'{process_tag}2Q >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
         
@@ -289,20 +251,20 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
             logger.warning(f'{process_tag}2Q >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
     
-    #sometimes the connection may time out
+    # sometimes the connection may time out
     except requests.Timeout:
         logger.warning(f'{process_tag}2Q >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
         raise
     
     except:
         logger.debug(f'{process_tag}2Q >>> Product company query has failed for {product_id}.')
-        #uncomment for debugging purposes only
+        # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         raise
 
 def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, session, db_connection):
-    
-    product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,expanded_dlcs,description,screenshots,videos,related_products,changelog'
+    # unused additional expand options: expanded_dlcs, screenshots, videos
+    product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,related_products,changelog'
     
     try:
         response = session.get(product_url, timeout=HTTP_TIMEOUT)
@@ -318,12 +280,12 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
             
             is_movie = False
             
-            #no need to do any processing if an entry is found in 'full' or 'builds' scan modes, 
-            #since that entry will be skipped anyway
+            # no need to do any processing if an entry is found in 'full' or 'builds' scan modes, 
+            # since that entry will be skipped anyway
             if not (entry_count == 1 and (scan_mode == 'full' or scan_mode == 'builds')):
-                #ignore unicode control characters which can be part of game descriptions and/or changelogs; 
-                #these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes 
-                #even with unicode conversions from and to the db... why do you do this, GOG, why???
+                # ignore unicode control characters which can be part of game descriptions and/or changelogs; 
+                # these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes 
+                # even with unicode conversions from and to the db... why do you do this, GOG, why???
                 filtered_response = response.text
                 for unicode_value in JSON_UNICODE_FILTERED_VALUES:
                     filtered_response = filtered_response.replace(unicode_value, '')
@@ -331,32 +293,22 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 json_parsed = json.loads(filtered_response, object_pairs_hook=OrderedDict)
                 json_formatted = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
                 
-                #process unmodified fields
+                # process unmodified fields
                 #product_id = json_parsed['id']
                 product_title = json_parsed['title'].strip()
-                product_slug = json_parsed['slug']
-                #process content_system_compatibility
-                cs_compat_windows = json_parsed['content_system_compatibility']['windows']
-                cs_compat_osx = json_parsed['content_system_compatibility']['osx']
-                cs_compat_linux = json_parsed['content_system_compatibility']['linux']
-                #process languages
+                game_type = json_parsed['game_type']
+                # process languages
                 if len(json_parsed['languages']) > 0:
                     languages = MVF_VALUE_SEPARATOR.join([''.join((language_key, ': ', json_parsed['languages'][language_key])) 
                                                           for language_key in json_parsed['languages'].keys()])
                 else:
                     languages = None
-                #process links
+                # process links
                 links_forum = json_parsed['links']['forum']
                 links_product_card = json_parsed['links']['product_card']
                 links_support = json_parsed['links']['support']
-                #process unmodified fields
-                in_development = json_parsed['in_development']['active']
-                is_installable = json_parsed['is_installable']
-                game_type = json_parsed['game_type']
-                is_pre_order = json_parsed['is_pre_order']
-                release_date = json_parsed['release_date']
-                #need to correct some GOG formatting wierdness by using regular expressions
-                #process description
+                # need to correct some GOG formatting wierdness by using regular expressions
+                # process description
                 try:
                     description_lead = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['description']['lead'], bodywidth=0).strip())
                 except AttributeError:
@@ -367,75 +319,78 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 except AttributeError:
                     description_full = None
                 if description_full == '': description_full = None
-                #appears to be treated like a per row input for a HTML list shown on the product webpage
+                # appears to be treated like a per row input for a HTML list shown on the product webpage
                 try:
                     description_cool = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['description']['whats_cool_about_it']
                                                                                .replace('\n', '<br><br>'), bodywidth=0).strip())
                 except AttributeError:
                     description_cool = None
                 if description_cool == '': description_cool = None
-                #process changelog
+                # process changelog
                 try:
                     changelog = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['changelog'], bodywidth=0).strip())
                 except AttributeError:
                     changelog = None
                 if changelog == '': changelog = None
                 
-                #if the API returned product title starts with 'product_title_', keep the existing product title
-                if product_title is not None and product_title.startswith('product_title_'):
-                    logger.warning(f'{process_tag}PQ >>> Product title update skipped since an invalid value was returned.')
-                    db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id,))
-                    product_title = db_cursor.fetchone()[0]
-                
-                #detect if the entry is a movie based on the links_forum value and then on the content of the 
-                #lead description field, since the APIs ofer no discrimination (it's not pretty, but it works)
+                # detect if the entry is a movie based on the links_forum value and then on the content of the 
+                # lead description field, since the APIs ofer no discrimination (it's not pretty, but it works)
                 if ((links_forum == 'https://www.gog.com/forum/movies' or 
                    (description_lead is not None and description_lead.startswith('IMDB rating:')) or 
                    product_id in STATIC_MOVIES_ID_LIST) 
                    and not product_id in STATIC_NON_MOVIES_ID_LIST):
                     is_movie = True
+                    
+                # movies do not have a valid v2 product API entry, so parse the value for gp_v2_gog_release_date  
+                # now and also change the value of gp_game_type to 'movies' in order to better differentiate them 
+                # (it's set to 'game' for all movie ids by default, although that makes little sense)
+                if is_movie:
+                    game_type = 'movie'
+                    # the value stored here is identical to gogReleaseDate in the v2 API payload
+                    gog_release_date = json_parsed['release_date']
+                else:
+                    gog_release_date = None
             
             if entry_count == 0:
                 with db_lock:
-                    #gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated, gp_int_json_payload, 
-                    #gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload, 
-                    #gp_int_v2_json_diff, gp_int_is_movie, gp_v2_developer, gp_v2_publisher, 
-                    #gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features, 
-                    #gp_v2_is_using_dosbox, gp_id, gp_title, gp_slug, gp_cs_compat_windows, 
-                    #gp_cs_compat_osx, gp_cs_compat_linux, gp_languages, gp_links_forum, 
-                    #gp_links_product_card, gp_links_support, gp_in_development, gp_is_installable, 
-                    #gp_game_type, gp_is_pre_order, gp_release_date, gp_description_lead, 
-                    #gp_description_full, gp_description_cool, gp_changelog
+                    # gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated, gp_int_json_payload, 
+                    # gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload, gp_int_v2_json_diff, 
+                    # gp_id, gp_title, gp_game_type, gp_v2_developer, gp_v2_publisher, 
+                    # gp_v2_size, gp_v2_is_pre_order, gp_v2_in_development, gp_v2_is_installable, 
+                    # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx, 
+                    # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date, 
+                    # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features, gp_v2_is_using_dosbox, 
+                    # gp_links_forum, gp_links_product_card, gp_links_support, 
+                    # gp_languages, gp_description_lead, gp_description_full, 
+                    # gp_description_cool, gp_changelog
                     db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted, 
-                                                        None, None, None, None, is_movie, None, None, 
-                                                        None, None, None, None, None, 
-                                                        product_id, product_title, product_slug, cs_compat_windows, 
-                                                        cs_compat_osx, cs_compat_linux, languages, links_forum, 
-                                                        links_product_card, links_support, in_development, is_installable, 
-                                                        game_type, is_pre_order, release_date, description_lead, 
-                                                        description_full, description_cool, changelog))
+                                                        None, None, None, None, 
+                                                        product_id, product_title, game_type, None, None, 
+                                                        0, False, False, False, 
+                                                        False, False, False, 
+                                                        None, None, gog_release_date, 
+                                                        None, None, None, None, False, 
+                                                        links_forum, links_product_card, links_support, 
+                                                        languages, description_lead, description_full, 
+                                                        description_cool, changelog))
                     db_connection.commit()
                 logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title}.')
                 
-                #movies do not have a valid v2 product API entry
+                # movies do not have a valid v2 product API entry
                 if not is_movie:
-                    #call the v2 api query to save the v2 json payload and populate developer/publisher values
+                    # call the v2 api query to save the v2 json payload and populate developer/publisher values
                     gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
-                    #fall back to website scraping of developer/publisher values for movies
-                elif links_product_card is not None:
-                    gog_product_company_query(process_tag, product_id, db_lock, session, db_connection, 
-                                              links_product_card.replace('/game/', '/movie/'))
             
             elif entry_count == 1:
-                #do not update existing entries in a full or builds scan, since update/delta scans will take care of that
+                # do not update existing entries in a full or builds scan, since update/delta scans will take care of that
                 if scan_mode == 'full' or scan_mode == 'builds':
                     logger.info(f'{process_tag}PQ >>> Found an existing db entry with id {product_id}. Skipping.')
-                #manual scans will be treated as update scans
+                # manual scans will be treated as update scans
                 else:
                     db_cursor.execute('SELECT gp_int_delisted, gp_int_json_payload FROM gog_products WHERE gp_id = ?', (product_id,))
                     existing_delisted, existing_json_formatted = db_cursor.fetchone()
                     
-                    #clear the delisted status if an id is relisted (should only happen rarely)
+                    # clear the delisted status if an id is relisted (should only happen rarely)
                     if existing_delisted is not None:
                         logger.debug(f'{process_tag}PQ >>> Found a previously delisted entry with id {product_id}. Removing delisted status...')
                         with db_lock:
@@ -446,8 +401,8 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                     if existing_json_formatted != json_formatted:
                         logger.debug(f'{process_tag}PQ >>> Existing entry for {product_id} is outdated. Updating...')
                         
-                        #calculate the diff between the new json and the previous one
-                        #(applying the diff on the new json will revert to the previous version)
+                        # calculate the diff between the new json and the previous one
+                        # (applying the diff on the new json will revert to the previous version)
                         if existing_json_formatted is not None:
                             diff_formatted = ''.join([line for line in difflib.unified_diff(json_formatted.splitlines(1), 
                                                                                             existing_json_formatted.splitlines(1), n=0)])
@@ -455,39 +410,34 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                             diff_formatted = None
                         
                         with db_lock:
-                            #gp_int_updated, gp_int_json_payload, gp_int_json_diff, gp_title, 
-                            #gp_slug, gp_cs_compat_windows, gp_cs_compat_osx, gp_cs_compat_linux, 
-                            #gp_languages, gp_links_forum, gp_links_product_card, gp_links_support, 
-                            #gp_in_development, gp_is_installable, gp_game_type, gp_is_pre_order, gp_release_date, 
-                            #gp_description_lead, gp_description_full, gp_description_cool, gp_changelog, gp_id (WHERE clause)
-                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted, product_title, 
-                                                                product_slug, cs_compat_windows, cs_compat_osx, cs_compat_linux, 
-                                                                languages, links_forum, links_product_card, links_support, 
-                                                                in_development, is_installable, game_type, is_pre_order, release_date, 
-                                                                description_lead, description_full, description_cool, changelog, product_id))
+                            # gp_int_updated, gp_int_json_payload, gp_int_json_diff, 
+                            # gp_title, gp_game_type, 
+                            # gp_links_forum, gp_links_product_card, gp_links_support, 
+                            # gp_languages, gp_description_lead, gp_description_full, 
+                            # gp_description_cool, gp_changelog, gp_id (WHERE clause)
+                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted, 
+                                                                product_title, game_type, 
+                                                                links_forum, links_product_card, links_support, 
+                                                                languages, description_lead, description_full, 
+                                                                description_cool, changelog, product_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
                     
-                    #movies do not have a valid v2 product API entry
+                    # movies do not have a valid v2 product API entry
                     if not is_movie:
-                        #call the v2 api query to save the v2 json payload and update developer/publisher values
+                        # call the v2 api query to save the v2 json payload and update developer/publisher values
                         gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
-                    #fall back to website scraping of developer/publisher values for movies
-                    elif links_product_card is not None:
-                        gog_product_company_query(process_tag, product_id, db_lock, session, db_connection, 
-                                                  links_product_card.replace('/game/', '/movie/'))
         
-        #existing ids return a 404 HTTP error code on removal
+        # existing ids return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
-            #check to see the existing value for gp_int_no_longer_listed
             db_cursor = db_connection.execute('SELECT gp_int_delisted, gp_title FROM gog_products WHERE gp_id = ?', (product_id,))
             existing_delisted, product_title = db_cursor.fetchone()
             
-            #only alter the entry if not already marked as no longer listed
+            # only alter the entry if not already marked as no longer listed
             if existing_delisted is None:
                 logger.debug(f'{process_tag}PQ >>> Product with id {product_id} has been delisted...')
                 with db_lock:
-                    #also clear diff fields when marking a product as delisted
+                    # also clear diff fields when marking a product as delisted
                     db_cursor.execute('UPDATE gog_products SET gp_int_delisted = ?, gp_int_json_diff = NULL, gp_int_v2_json_diff = NULL '
                                       'WHERE gp_id = ?', (datetime.now(), product_id))
                     db_connection.commit()
@@ -495,7 +445,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
             else:
                 logger.debug(f'{process_tag}PQ >>> Product with id {product_id} is already marked as delisted.')
         
-        #unmapped ids will also return a 404 HTTP error code
+        # unmapped ids will also return a 404 HTTP error code
         elif response.status_code == 404:
             logger.debug(f'{process_tag}PQ >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
         
@@ -505,24 +455,24 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
         
         return True
     
-    #sometimes the connection may time out
+    # sometimes the connection may time out
     except requests.Timeout:
         logger.warning(f'{process_tag}PQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
         return False
     
-    #sometimes the HTTPS connection encounters SSL errors
+    # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'{process_tag}PQ >>> Connection SSL error encountered for {product_id}.')
         return False
     
-    #sometimes the HTTPS connection gets rejected/terminated
+    # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'{process_tag}PQ >>> Connection error encountered for {product_id}.')
         return False
     
     except:
         logger.debug(f'{process_tag}PQ >>> Product extended query has failed for {product_id}.')
-        #uncomment for debugging purposes only
+        # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         return False
 
@@ -532,7 +482,7 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
     
     logger.debug(f'GQ >>> Querying url: {catalog_url}.')
     
-    #return a value of 0, should something go terribly wrong
+    # return a value of 0, should something go terribly wrong
     pages = 0
     
     try:
@@ -543,11 +493,11 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
         if response.status_code == HTTP_OK:
             gogData_json = json.loads(response.text, object_pairs_hook=OrderedDict)
             
-            #return the number of pages, as listed in the response
+            # return the number of pages, as listed in the response
             pages = gogData_json['pages']
             logger.debug(f'GQ >>> Response pages: {pages}.')
             
-            #use a set to avoid processing potentially duplicate ids
+            # use a set to avoid processing potentially duplicate ids
             id_set = set()
             
             for product_element in gogData_json['products']:
@@ -555,7 +505,7 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
                 logger.debug(f'GQ >>> Found the following id: {id_value}.')
                 id_set.add(id_value)
             
-            #sort the set into an ordered list
+            # sort the set into an ordered list
             id_list = sorted(id_set)
             
             for product_id in id_list:
@@ -574,7 +524,7 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
                     
                     if not retries_complete:
                         retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        # terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
                             logger.critical('Retry count exceeded, terminating scan!')
                             raise Exception()
@@ -585,24 +535,24 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
         
         return (True, pages)
     
-    #sometimes the connection may time out
+    # sometimes the connection may time out
     except requests.Timeout:
         logger.warning(f'GQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
         return (False, 0)
     
-    #sometimes the HTTPS connection encounters SSL errors
+    # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'GQ >>> Connection SSL error encountered for {product_id}.')
         return (False, 0)
     
-    #sometimes the HTTPS connection gets rejected/terminated
+    # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'GQ >>> Connection error encountered for {product_id}.')
         return (False, 0)
     
     except:
         logger.debug('GQ >>> Processing has failed!')
-        #uncomment for debugging purposes only
+        # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         return (False, 0)
 
@@ -613,16 +563,16 @@ def gog_files_extract_parser(db_connection, product_id):
     
     json_parsed = json.loads(json_payload, object_pairs_hook=OrderedDict)
     
-    #extract installer entries
+    # extract installer entries
     json_parsed_installers = json_parsed['downloads']['installers']
-    #extract patch entries
+    # extract patch entries
     json_parsed_patches = json_parsed['downloads']['patches']
-    #extract language_packs entries
+    # extract language_packs entries
     json_parsed_language_packs = json_parsed['downloads']['language_packs']
-    #extract bonus_content entries
+    # extract bonus_content entries
     json_parsed_bonus_content = json_parsed['downloads']['bonus_content']
     
-    #process installer entries
+    # process installer entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
                       'AND gf_int_download_type = \'installer\' AND gf_int_removed IS NULL', (product_id,))
     listed_installer_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
@@ -654,13 +604,13 @@ def gog_files_extract_parser(db_connection, product_id):
             entry_pk = db_cursor.fetchone()
             
             if entry_pk is None:
-                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
-                #gf_id, gf_name, gf_os, gf_language, gf_version,
-                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
+                # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
+                # gf_id, gf_name, gf_os, gf_language, gf_version,
+                # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
                 db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'installer', 
                                                        installer_id, installer_product_name, installer_os, installer_language, installer_version, 
                                                        None, None, installer_total_size, installer_file_id, installer_file_size))
-                #no need to print the os here, as it's included in the installer_id
+                # no need to print the os here, as it's included in the installer_id
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {installer_product_name}, {installer_id}, {installer_version}.')
             
             else:
@@ -673,7 +623,7 @@ def gog_files_extract_parser(db_connection, product_id):
         
         logger.info(f'FQ --- Marked some installer entries as removed for {product_id}')
     
-    #process patch entries
+    # process patch entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
                       'AND gf_int_download_type = \'patch\' AND gf_int_removed IS NULL', (product_id,))
     listed_patch_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
@@ -687,7 +637,7 @@ def gog_files_extract_parser(db_connection, product_id):
             patch_version = patch_entry['version'].strip()
         except AttributeError:
             patch_version = None
-        #replace blank patch version with None (blanks happens with patches, but not with installers)
+        # replace blank patch version with None (blanks happens with patches, but not with installers)
         if patch_version == '': patch_version = None
         patch_total_size = patch_entry['total_size']
         
@@ -707,13 +657,13 @@ def gog_files_extract_parser(db_connection, product_id):
             entry_pk = db_cursor.fetchone()
             
             if entry_pk is None:
-                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, 
-                #gf_id, gf_name, gf_os, gf_language, gf_version, 
-                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
+                # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, 
+                # gf_id, gf_name, gf_os, gf_language, gf_version, 
+                # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
                 db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'patch', 
                                                        patch_id, patch_product_name, patch_os, patch_language, patch_version, 
                                                        None, None, patch_total_size, patch_file_id, patch_file_size))
-                #no need to print the os here, as it's included in the patch_id
+                # no need to print the os here, as it's included in the patch_id
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {patch_product_name}, {patch_id}, {patch_version}.')
             
             else:
@@ -726,7 +676,7 @@ def gog_files_extract_parser(db_connection, product_id):
         
         logger.info(f'FQ --- Marked some patch entries as removed for {product_id}')
     
-    #process language_packs entries
+    # process language_packs entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
                       'AND gf_int_download_type = \'language_packs\' AND gf_int_removed IS NULL', (product_id,))
     listed_language_packs_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
@@ -760,13 +710,13 @@ def gog_files_extract_parser(db_connection, product_id):
             entry_pk = db_cursor.fetchone()
             
             if entry_pk is None:
-                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, gf_id, 
-                #gf_name, gf_os, gf_language, gf_version, 
-                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
+                # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, gf_id, 
+                # gf_name, gf_os, gf_language, gf_version, 
+                # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
                 db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'language_packs', language_pack_id, 
                                                        language_pack_product_name, language_pack_os, language_pack_language, language_pack_version, 
                                                        None, None, language_pack_total_size, language_pack_file_id, language_pack_file_size))
-                #no need to print the os here, as it's included in the patch_id
+                # no need to print the os here, as it's included in the patch_id
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {language_pack_product_name}, {language_pack_id}, {language_pack_version}.')
             
             else:
@@ -779,7 +729,7 @@ def gog_files_extract_parser(db_connection, product_id):
         
         logger.info(f'FQ --- Marked some language_pack entries as removed for {product_id}')
     
-    #process bonus_content entries
+    # process bonus_content entries
     db_cursor.execute('SELECT gf_int_nr FROM gog_files WHERE gf_int_id = ? '
                       'AND gf_int_download_type = \'bonus_content\' AND gf_int_removed IS NULL', (product_id,))
     listed_bonus_content_pks = [pk_result[0] for pk_result in db_cursor.fetchall()]
@@ -787,7 +737,7 @@ def gog_files_extract_parser(db_connection, product_id):
     for bonus_content_entry in json_parsed_bonus_content:
         bonus_content_id = bonus_content_entry['id']
         bonus_content_product_name = bonus_content_entry['name'].strip()
-        #bonus content type 'guides & reference ' has a trailing space
+        # bonus content type 'guides & reference ' has a trailing space
         bonus_content_type = bonus_content_entry['type'].strip()
         bonus_content_count = bonus_content_entry['count']
         bonus_content_total_size = bonus_content_entry['total_size']
@@ -803,14 +753,14 @@ def gog_files_extract_parser(db_connection, product_id):
             entry_pk = db_cursor.fetchone()
             
             if entry_pk is None:
-                #gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, 
-                #gf_id, gf_name, gf_os, gf_language, gf_version, 
-                #gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
+                # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, 
+                # gf_id, gf_name, gf_os, gf_language, gf_version, 
+                # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
                 db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'bonus_content', 
                                                        bonus_content_id, bonus_content_product_name, None, None, None, 
                                                        bonus_content_type, bonus_content_count, bonus_content_total_size, 
                                                        bonus_content_file_id, bonus_content_file_size))
-                #print the entry type, since bonus_content entries are not versioned
+                # print the entry type, since bonus_content entries are not versioned
                 logger.info(f'FQ +++ Added DB entry for {product_id}: {bonus_content_product_name}, {bonus_content_id}, {bonus_content_type}.')
             
             else:
@@ -823,11 +773,10 @@ def gog_files_extract_parser(db_connection, product_id):
         
         logger.info(f'FQ --- Marked some bonus_content entries as removed for {product_id}')
     
-    #batch commit
     db_connection.commit()
 
 def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session, db_connection):
-    #generate a string of comma separated ids in the current batch
+    # generate a string of comma separated ids in the current batch
     product_ids_string = ','.join([str(product_id_value) for product_id_value in range(product_id, product_id + IDS_IN_BATCH)])
     logger.debug(f'{process_tag}BQ >>> Processing the following product_id string batch: {product_ids_string}.')
     
@@ -863,7 +812,7 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
                     else:
                         retry_counter += 1
         
-        #this should not be handled as an exception, as it's the default behavior when nothing is detected
+        # this should not be handled as an exception, as it's the default behavior when nothing is detected
         elif response.status_code == HTTP_OK and response.text == '[]':
             logger.debug(f'{process_tag}BQ >>> A blank list entry ([]) received.')
         
@@ -874,33 +823,33 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
         
         return True
     
-    #sometimes the HTTPS connection encounters SSL errors
+    # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'{process_tag}BQ >>> Connection SSL error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
         return False
     
-    #sometimes the HTTPS connection gets rejected/terminated
+    # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'{process_tag}BQ >>> Connection error encountered for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
         return False
     
     except:
         logger.debug(f'{process_tag}BQ >>> Products bulk query has failed for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
-        #uncomment for debugging purposes only
+        # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         
         return False
 
 def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock, 
                    fail_event, terminate_event):
-    #catch SIGTERM and exit gracefully
+    # catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
-    #catch SIGINT and exit gracefully
+    # catch SIGINT and exit gracefully
     signal.signal(signal.SIGINT, sigint_handler)
     
     processConfigParser = ConfigParser()
     
-    with requests.Session() as processSession, sqlite3.connect(db_file_path) as process_db_connection:
+    with requests.Session() as processSession, sqlite3.connect(DB_FILE_PATH) as process_db_connection:
         logger.info(f'{process_tag}>>> Starting worker process...')
         
         try:
@@ -913,7 +862,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                 while not retries_complete and not terminate_event.is_set():
                     if retry_counter > 0:
                         logger.debug(f'{process_tag}>>> Retry count: {retry_counter}.')
-                        #main iteration incremental sleep
+                        # main iteration incremental sleep
                         sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
                         
                         retries_complete = gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, 
@@ -924,7 +873,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                             logger.info(f'{process_tag}>>> Succesfully retried for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
                     else:
                         retry_counter += 1
-                        #terminate the scan if the RETRY_COUNT limit is exceeded
+                        # terminate the scan if the RETRY_COUNT limit is exceeded
                         if retry_counter > RETRY_COUNT:
                             logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
                             fail_event.set()
@@ -932,15 +881,15 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                 
                 if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
-                        processConfigParser.read(conf_file_path)
+                        processConfigParser.read(CONF_FILE_PATH)
                         processConfigParser['FULL_SCAN']['start_id'] = str(product_id)
                         
-                        with open(conf_file_path, 'w') as file:
+                        with open(CONF_FILE_PATH, 'w') as file:
                             processConfigParser.write(file)
                         
                         logger.info(f'{process_tag}>>> Processed up to id: {product_id}...')
         
-        #the main process has stopped populating the queue if this exception is raised
+        # the main process has stopped populating the queue if this exception is raised
         except queue.Empty:
             logger.debug(f'{process_tag}>>> Timed out while waiting for queue.')
         
@@ -954,9 +903,9 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
             process_db_connection.execute(OPTIMIZE_QUERY)
 
 if __name__ == "__main__":
-    #catch SIGTERM and exit gracefully
+    # catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
-    #catch SIGINT and exit gracefully
+    # catch SIGINT and exit gracefully
     signal.signal(signal.SIGINT, sigint_handler)
     
     parser = argparse.ArgumentParser(description=('GOG products scan (part of gog_gles) - a script to call publicly available GOG APIs '
@@ -976,14 +925,14 @@ if __name__ == "__main__":
     configParser = ConfigParser()
     
     try:
-        configParser.read(conf_file_path)
+        configParser.read(CONF_FILE_PATH)
         
-        #parsing generic parameters
+        # parsing generic parameters
         general_section = configParser['GENERAL']
         LOGGING_LEVEL = general_section.get('logging_level').upper()
         
-        #DEBUG, INFO, WARNING, ERROR, CRITICAL
-        #remains set to INFO if none of the other valid log levels are specified
+        # DEBUG, INFO, WARNING, ERROR, CRITICAL
+        # remains set to INFO if none of the other valid log levels are specified
         if LOGGING_LEVEL == 'INFO':
             pass
         elif LOGGING_LEVEL == 'DEBUG':
@@ -1002,10 +951,10 @@ if __name__ == "__main__":
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
         RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
-        #used as a workaround in movies detection logic - ids will always be treated as movies
+        # used as a workaround in movies detection logic - ids will always be treated as movies
         STATIC_MOVIES_ID_LIST = [int(product_id.strip()) for product_id in 
                                  general_section.get('static_movies_id_list').split(',')]
-        #used as a workaround in movies detection logic - ids will always be treated as non-movies
+        # used as a workaround in movies detection logic - ids will always be treated as non-movies
         STATIC_NON_MOVIES_ID_LIST = [int(product_id.strip()) for product_id in 
                                      general_section.get('static_non_movies_id_list').split(',')]
     except:
@@ -1014,7 +963,7 @@ if __name__ == "__main__":
     
     logger.info('*** Running PRODUCTS scan script ***')
     
-    #detect any parameter overrides and set the scan_mode accordingly
+    # detect any parameter overrides and set the scan_mode accordingly
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
         
@@ -1033,31 +982,31 @@ if __name__ == "__main__":
         elif args.delisted:
             scan_mode = 'delisted'
     
-    #boolean 'true' or scan_mode specific activation
+    # boolean 'true' or scan_mode specific activation
     if CONF_BACKUP == 'true' or CONF_BACKUP == scan_mode:
-        if os.path.exists(conf_file_path):
-            #create a backup of the existing conf file - mostly for debugging/recovery
-            copy2(conf_file_path, conf_file_path + '.bak')
+        if os.path.exists(CONF_FILE_PATH):
+            # create a backup of the existing conf file - mostly for debugging/recovery
+            copy2(CONF_FILE_PATH, CONF_FILE_PATH + '.bak')
             logger.info('Successfully created conf file backup.')
         else:
             logger.critical('Could find specified conf file!')
             raise SystemExit(2)
     
-    #boolean 'true' or scan_mode specific activation
+    # boolean 'true' or scan_mode specific activation
     if DB_BACKUP == 'true' or DB_BACKUP == scan_mode:
-        if os.path.exists(db_file_path):
-            #create a backup of the existing db - mostly for debugging/recovery
-            copy2(db_file_path, db_file_path + '.bak')
+        if os.path.exists(DB_FILE_PATH):
+            # create a backup of the existing db - mostly for debugging/recovery
+            copy2(DB_FILE_PATH, DB_FILE_PATH + '.bak')
             logger.info('Successfully created db backup.')
         else:
             #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
             raise SystemExit(3)
     
-    ##inter-process resources locks
+    # inter-process resources locks
     db_lock = multiprocessing.Lock()
     config_lock = multiprocessing.Lock()
-    ##shared process events
+    # shared process events
     terminate_event = multiprocessing.Event()
     terminate_event.clear()
     fail_event = multiprocessing.Event()
@@ -1068,16 +1017,16 @@ if __name__ == "__main__":
         
         full_scan_section = configParser['FULL_SCAN']
         ID_SAVE_INTERVAL = full_scan_section.getint('id_save_interval')
-        #50 is the max id batch size allowed by the bulk products API
+        # 50 is the max id batch size allowed by the bulk products API
         IDS_IN_BATCH = full_scan_section.getint('ids_in_batch')
-        #number of active connection processes
+        # number of active connection processes
         CONNECTION_PROCESSES = full_scan_section.getint('connection_processes')
-        #stop_id = 2147483647, in order to scan the full range,
-        #stopping at the upper limit of a 32 bit signed integer type
+        # stop_id = 2147483647, in order to scan the full range,
+        # stopping at the upper limit of a 32 bit signed integer type
         STOP_ID = full_scan_section.getint('stop_id')
-        #product_id will restart from scan_id
+        # product_id will restart from scan_id
         product_id = full_scan_section.getint('start_id')
-        #reduce starting point by a batch to account for any process overlap
+        # reduce starting point by a batch to account for any process overlap
         if product_id > ID_SAVE_INTERVAL: product_id -= ID_SAVE_INTERVAL
         
         logger.info(f'Restarting scan from id: {product_id}.')
@@ -1088,7 +1037,7 @@ if __name__ == "__main__":
         
         try:
             for process_no in range(CONNECTION_PROCESSES):
-                #apply spacing to single digit process_no for nicer logging in case of 10+ processes
+                # apply spacing to single digit process_no for nicer logging in case of 10+ processes
                 PROCESS_LOGGING_FILLER = '0' if CONNECTION_PROCESSES > 9 and process_no < 9 else ''
                 process_tag_nice = ''.join(('P#', PROCESS_LOGGING_FILLER, str(process_no + 1), ' '))
                 
@@ -1102,9 +1051,9 @@ if __name__ == "__main__":
             
             while not stop_id_reached and not terminate_event.is_set():
                 try:
-                    #pass only the start product_id for the current batch
+                    # pass only the start product_id for the current batch
                     id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
-                    #skip an IDS_IN_BATCH interval
+                    # skip an IDS_IN_BATCH interval
                     product_id += IDS_IN_BATCH
                     
                     if product_id > STOP_ID:
@@ -1145,14 +1094,12 @@ if __name__ == "__main__":
             logger.info(f'Restarting update scan from id: {last_id}.')
         
         try:
-            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-                #skip products which are no longer listed
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? '
                                                   'AND gp_int_delisted IS NULL ORDER BY 1', (last_id,))
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all existing product ids from the DB...')
                 
-                #track the number of processed ids
                 last_id_counter = 0
                 
                 for id_entry in id_list:
@@ -1178,17 +1125,17 @@ if __name__ == "__main__":
                         
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_event.set()
                                 terminate_event.set()
                     
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
-                        configParser.read(conf_file_path)
+                        configParser.read(CONF_FILE_PATH)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
-                        with open(conf_file_path, 'w') as file:
+                        with open(CONF_FILE_PATH, 'w') as file:
                             configParser.write(file)
                         
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
@@ -1204,12 +1151,12 @@ if __name__ == "__main__":
         logger.info('--- Running in NEW scan mode ---')
         
         try:
-            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 logger.info('Running scan for new arrival entries...')
                 page_no = 1
-                #start off with 1, then use whatever is returned by the API call
+                # start off with 1, then use whatever is returned by the API call
                 new_page_count = 1
-                #use default website pagination, which means the response can be split across 2+ pages in the API call
+                # use default website pagination, which means the response can be split across 2+ pages in the API call
                 while page_no <= new_page_count and not terminate_event.is_set():
                     retries_complete = False
                     retry_counter = 0
@@ -1221,7 +1168,7 @@ if __name__ == "__main__":
                             logger.warning(f'Reprocessing new arrivals page {page_no}...')
                         
                         new_params = ''.join(('limit=48&releaseStatuses=in:new-arrival&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
-                                              #locales and currency don't matter here, but emulate default GOG website behavior
+                                              # locales and currency don't matter here, but emulate default GOG website behavior
                                               str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
                         retries_complete, new_page_count = gog_product_games_catalog_query(new_params, scan_mode, db_lock, 
                                                                                            session, db_connection)
@@ -1234,7 +1181,7 @@ if __name__ == "__main__":
                         
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_event.set()
@@ -1242,9 +1189,9 @@ if __name__ == "__main__":
                 
                 logger.info('Running scan for upcoming entries...')
                 page_no = 1
-                #start off with 1, then use whatever is returned by the API call
+                # start off with 1, then use whatever is returned by the API call
                 upcoming_page_count = 1
-                #use default website pagination, which means the response can be split across 2+ pages in the API call
+                # use default website pagination, which means the response can be split across 2+ pages in the API call
                 while page_no <= upcoming_page_count and not terminate_event.is_set():
                     retries_complete = False
                     retry_counter = 0
@@ -1256,7 +1203,7 @@ if __name__ == "__main__":
                             logger.warning(f'Reprocessing upcoming entries page {page_no}...')
                         
                         upcoming_params = ''.join(('limit=48&releaseStatuses=in:upcoming&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=', 
-                                                   #locales and currency don't matter here, but emulate default GOG website behavior
+                                                   # locales and currency don't matter here, but emulate default GOG website behavior
                                                    str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
                         retries_complete, upcoming_page_count = gog_product_games_catalog_query(upcoming_params, scan_mode, db_lock, 
                                                                                                 session, db_connection)
@@ -1269,7 +1216,7 @@ if __name__ == "__main__":
                         
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_event.set()
@@ -1286,7 +1233,6 @@ if __name__ == "__main__":
         logger.info('--- Running in MANUAL scan mode ---')
         
         manual_scan_section = configParser['MANUAL_SCAN']
-        #load the product id list to process
         id_list = manual_scan_section.get('id_list')
         
         if id_list == '':
@@ -1300,7 +1246,7 @@ if __name__ == "__main__":
             raise SystemExit(4)
         
         try:
-            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 for product_id in id_list:
                     logger.info(f'Running scan for id {product_id}...')
                     retries_complete = False
@@ -1320,7 +1266,7 @@ if __name__ == "__main__":
                                 logger.info(f'Succesfully retried for {product_id}.')
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_event.set()
@@ -1333,12 +1279,12 @@ if __name__ == "__main__":
             terminate_event.set()
             logger.info('Stopping manual scan...')
     
-    #run product scan against items that have no title linked to them in the builds table
+    # run product scan against items that have no title linked to them in the builds table
     elif scan_mode == 'builds':
         logger.info('--- Running in BUILDS scan mode ---')
         
         try:
-            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT gb_int_id FROM gog_builds WHERE gb_int_title IS NULL ORDER BY 1')
                 id_list = db_cursor.fetchall()
                 
@@ -1364,7 +1310,7 @@ if __name__ == "__main__":
                                 logger.info(f'Succesfully retried for {current_product_id}.')
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_event.set()
@@ -1377,12 +1323,12 @@ if __name__ == "__main__":
             terminate_event.set()
             logger.info('Stopping builds scan...')
     
-    #extract file entries collected during the latest update runs
+    # extract file entries collected during the latest update runs
     elif scan_mode == 'extract':
         logger.info('--- Running in FILE EXTRACT scan mode ---')
         
         try:
-            with sqlite3.connect(db_file_path) as db_connection:
+            with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL ORDER BY 1')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all existing product ids from the DB...')
@@ -1404,8 +1350,7 @@ if __name__ == "__main__":
         logger.info('--- Running in DELISTED scan mode ---')
         
         try:
-            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
-                #select all products which are no longer listed
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NOT NULL ORDER BY 1')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all delisted product ids from the DB...')
@@ -1430,7 +1375,7 @@ if __name__ == "__main__":
                                 logger.info(f'Succesfully retried for {current_product_id}.')
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_event.set()
@@ -1445,14 +1390,14 @@ if __name__ == "__main__":
     
     if not terminate_event.is_set() and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')
-        configParser.read(conf_file_path)
+        configParser.read(CONF_FILE_PATH)
         configParser['UPDATE_SCAN']['last_id'] = ''
         
-        with open(conf_file_path, 'w') as file:
+        with open(CONF_FILE_PATH, 'w') as file:
             configParser.write(file)
     
     logger.info('All done! Exiting...')
     
-    #return a non-zero exit code if a scan failure was encountered
+    # return a non-zero exit code if a scan failure was encountered
     if terminate_event.is_set() and fail_event.is_set():
         raise SystemExit(5)
