@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.70
-@date: 16/04/2023
+@version: 3.80
+@date: 12/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -22,28 +22,28 @@ from datetime import datetime
 from time import sleep
 from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
-#uncomment for debugging purposes only
+# uncomment for debugging purposes only
 #import traceback
 
-##conf file block
-conf_file_path = os.path.join('..', 'conf', 'gog_ratings_scan.conf')
+# conf file block
+CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_ratings_scan.conf')
 
-##logging configuration block
-log_file_path = os.path.join('..', 'logs', 'gog_ratings_scan.log')
-logger_file_handler = RotatingFileHandler(log_file_path, maxBytes=25165824, backupCount=1, encoding='utf-8')
-logger_format = '%(asctime)s %(levelname)s >>> %(message)s'
-logger_file_handler.setFormatter(logging.Formatter(logger_format))
-#logging level for other modules
-logging.basicConfig(format=logger_format, level=logging.ERROR) #DEBUG, INFO, WARNING, ERROR, CRITICAL
+# logging configuration block
+LOG_FILE_PATH = os.path.join('..', 'logs', 'gog_ratings_scan.log')
+logger_file_handler = RotatingFileHandler(LOG_FILE_PATH, maxBytes=25165824, backupCount=1, encoding='utf-8')
+LOGGER_FORMAT = '%(asctime)s %(levelname)s >>> %(message)s'
+logger_file_handler.setFormatter(logging.Formatter(LOGGER_FORMAT))
+# logging level for other modules
+logging.basicConfig(format=LOGGER_FORMAT, level=logging.ERROR)
 logger = logging.getLogger(__name__)
-#logging level defaults to INFO, but can be later modified through config file values
-logger.setLevel(logging.INFO)
+# logging level defaults to INFO, but can be later modified through config file values
+logger.setLevel(logging.INFO) # DEBUG, INFO, WARNING, ERROR, CRITICAL
 logger.addHandler(logger_file_handler)
 
-##db configuration block
-db_file_path = os.path.join('..', 'output_db', 'gog_gles.db')
+# db configuration block
+DB_FILE_PATH = os.path.join('..', 'output_db', 'gog_gles.db')
 
-##CONSTANTS
+# CONSTANTS
 INSERT_RATING_QUERY = 'INSERT INTO gog_ratings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 UPDATE_RATING_QUERY = ('UPDATE gog_ratings SET grt_int_updated = ?, '
@@ -92,27 +92,26 @@ def gog_ratings_query(product_id, is_verified, session):
         
         return (value, count, True)
     
-    #sometimes the HTTPS connection encounters SSL errors
+    # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'RTQ >>> Connection SSL error encountered for {product_id}.')
         return (None, None, False)
     
-    #sometimes the HTTPS connection gets rejected/terminated
+    # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'RTQ >>> Connection error encountered for {product_id}.')
         return (None, None, False)
     
     except:
         logger.debug(f'RTQ >>> Ratings query has failed for {product_id}.')
-        #uncomment for debugging purposes only
+        # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         
         return (None, None, False)
 
 def gog_reviews_query(product_id, session, db_connection):
-    
-    #limit the query to only one result in the english language, 
-    #which will return the most helpful review (because of desc:votes)
+    # limit the query to only one result in the english language, 
+    # which will return the most helpful review (because of desc:votes)
     reviews_url = f'https://reviews.gog.com/v1/products/{product_id}/reviews?language=in:en-US&limit=1&order=desc:votes'
     
     try:
@@ -134,10 +133,10 @@ def gog_reviews_query(product_id, session, db_connection):
                 
                 json_formatted = json.dumps(json_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
                 
-                #process unmodified fields
+                # process unmodified fields
                 review_count = json_parsed['reviewCount']
                 is_reviewable = json_parsed['isReviewable']
-                #get the overall ratings
+                # get the overall ratings
                 ratings_found = False
                 ratings_retries = 0
                 while not ratings_found:
@@ -149,7 +148,7 @@ def gog_reviews_query(product_id, session, db_connection):
                         ratings_retries += 1
                     elif ratings_retries > 0:
                         logger.info(f'RVQ >>> Successfully retried for {product_id}.')
-                #get the overall ratings for verified owners
+                # get the overall ratings for verified owners
                 ratings_found = False
                 ratings_retries = 0
                 while not ratings_found:
@@ -167,10 +166,10 @@ def gog_reviews_query(product_id, session, db_connection):
                 product_title = result[0]
                 
                 if entry_count == 0:
-                    #grt_int_nr, grt_int_added, grt_int_removed, grt_int_updated, grt_int_json_payload, 
-                    #grt_int_json_diff, grt_int_id, grt_int_title, grt_review_count, 
-                    #grt_avg_rating, grt_avg_rating_count, grt_avg_rating_verified_owner, 
-                    #grt_avg_rating_verified_owner_count, grt_is_reviewable
+                    # grt_int_nr, grt_int_added, grt_int_removed, grt_int_updated, grt_int_json_payload, 
+                    # grt_int_json_diff, grt_int_id, grt_int_title, grt_review_count, 
+                    # grt_avg_rating, grt_avg_rating_count, grt_avg_rating_verified_owner, 
+                    # grt_avg_rating_verified_owner_count, grt_is_reviewable
                     db_cursor.execute(INSERT_RATING_QUERY, (None, datetime.now(), None, None, json_formatted, 
                                                             None, product_id, product_title, review_count, 
                                                             avg_rating, avg_rating_count, avg_rating_verified_owner, 
@@ -182,7 +181,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     db_cursor.execute('SELECT grt_int_removed, grt_int_title, grt_int_json_payload FROM gog_ratings WHERE grt_int_id = ?', (product_id,))
                     existing_removed, existing_product_title, existing_json_formatted = db_cursor.fetchone()
                     
-                    #clear the removed status if an id is readded (should only happen rarely)
+                    # clear the removed status if an id is readded (should only happen rarely)
                     if existing_removed is not None:
                         logger.debug(f'RVQ >>> Found a removed entry with id {product_id}. Clearing removed status...')
                         db_cursor.execute('UPDATE gog_ratings SET grt_int_removed = NULL WHERE grt_int_id = ?', (product_id,))
@@ -199,17 +198,17 @@ def gog_reviews_query(product_id, session, db_connection):
                     if existing_json_formatted != json_formatted:
                         logger.debug(f'RVQ >>> Existing entry for {product_id} is outdated. Updating...')
                         
-                        #calculate the diff between the new json and the previous one 
-                        #(applying the diff on the new json will revert to the previous version)
+                        # calculate the diff between the new json and the previous one 
+                        # (applying the diff on the new json will revert to the previous version)
                         if existing_json_formatted is not None:
                             diff_formatted = ''.join([line for line in difflib.unified_diff(json_formatted.splitlines(1), 
                                                                                             existing_json_formatted.splitlines(1), n=0)])
                         else:
                             diff_formatted = None
                         
-                        #grt_int_updated, grt_int_json_payload, grt_int_json_diff, 
-                        #grt_review_count, grt_avg_rating, grt_avg_rating_count, grt_avg_rating_verified_owner, 
-                        #grt_avg_rating_verified_owner_count, grt_is_reviewable, grt_int_id (WHERE clause)
+                        # grt_int_updated, grt_int_json_payload, grt_int_json_diff, 
+                        # grt_review_count, grt_avg_rating, grt_avg_rating_count, grt_avg_rating_verified_owner, 
+                        # grt_avg_rating_verified_owner_count, grt_is_reviewable, grt_int_id (WHERE clause)
                         db_cursor.execute(UPDATE_RATING_QUERY, (datetime.now(), json_formatted, diff_formatted, 
                                                                 review_count, avg_rating, avg_rating_count, avg_rating_verified_owner, 
                                                                 avg_rating_verified_owner_count, is_reviewable, product_id))
@@ -217,16 +216,16 @@ def gog_reviews_query(product_id, session, db_connection):
                         logger.info(f'RVQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
             
             else:
-                #existing ids that no longer have any pages are considered removed
+                # existing ids that no longer have any pages are considered removed
                 if entry_count == 1:
-                    #check to see the existing value for grt_int_removed
+                    # check to see the existing value for grt_int_removed
                     db_cursor = db_connection.execute('SELECT grt_int_title, grt_int_removed FROM gog_ratings WHERE grt_int_id = ?', (product_id,))
                     product_title, existing_removed = db_cursor.fetchone()
                     
-                    #only alter the entry if not already marked as removed
+                    # only alter the entry if not already marked as removed
                     if existing_removed is None:
                         logger.debug(f'RVQ >>> Rating for {product_id} has been removed...')
-                        #also clear diff field when marking a rating as removed
+                        # also clear diff field when marking a rating as removed
                         db_cursor.execute('UPDATE gog_ratings SET grt_int_removed = ?, grt_int_json_diff = NULL '
                                             'WHERE grt_int_id = ?', (datetime.now(), product_id))
                         db_connection.commit()
@@ -236,7 +235,7 @@ def gog_reviews_query(product_id, session, db_connection):
                 else:
                     logger.debug(f'RVQ >>> {product_id} doesn\'t have any ratings.')
         
-        #some ids will return a 504 error - skip them
+        # some ids will return a 504 error - skip them
         elif response.status_code == 504:
             logger.warning(f'RVQ >>> Product with id {product_id} returned a HTTP 504 error code. Skipping.')
         
@@ -246,27 +245,27 @@ def gog_reviews_query(product_id, session, db_connection):
         
         return True
     
-    #sometimes the HTTPS connection encounters SSL errors
+    # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'RVQ >>> Connection SSL error encountered for {product_id}.')
         return False
     
-    #sometimes the HTTPS connection gets rejected/terminated
+    # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'RVQ >>> Connection error encountered for {product_id}.')
         return False
     
     except:
         logger.debug(f'RVQ >>> Reviews query has failed for {product_id}.')
-        #uncomment for debugging purposes only
+        # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         
         return False
 
 if __name__ == "__main__":
-    #catch SIGTERM and exit gracefully
+    # catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
-    #catch SIGINT and exit gracefully
+    # catch SIGINT and exit gracefully
     signal.signal(signal.SIGINT, sigint_handler)
     
     parser = argparse.ArgumentParser(description=('GOG ratings scan (part of gog_gles) - a script to call publicly available GOG APIs '
@@ -281,14 +280,14 @@ if __name__ == "__main__":
     configParser = ConfigParser()
     
     try:
-        configParser.read(conf_file_path)
+        configParser.read(CONF_FILE_PATH)
         
-        #parsing generic parameters
+        # parsing generic parameters
         general_section = configParser['GENERAL']
         LOGGING_LEVEL = general_section.get('logging_level').upper()
         
-        #DEBUG, INFO, WARNING, ERROR, CRITICAL
-        #remains set to INFO if none of the other valid log levels are specified
+        # DEBUG, INFO, WARNING, ERROR, CRITICAL
+        # remains set to INFO if none of the other valid log levels are specified
         if LOGGING_LEVEL == 'INFO':
             pass
         elif LOGGING_LEVEL == 'DEBUG':
@@ -313,7 +312,7 @@ if __name__ == "__main__":
     
     logger.info('*** Running RATINGS scan script ***')
     
-    #detect any parameter overrides and set the scan_mode accordingly
+    # detect any parameter overrides and set the scan_mode accordingly
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
         
@@ -322,21 +321,21 @@ if __name__ == "__main__":
         elif args.archive:
             scan_mode = 'archive'
     
-    #boolean 'true' or scan_mode specific activation
+    # boolean 'true' or scan_mode specific activation
     if CONF_BACKUP == 'true' or CONF_BACKUP == scan_mode:
-        if os.path.exists(conf_file_path):
-            #create a backup of the existing conf file - mostly for debugging/recovery
-            copy2(conf_file_path, conf_file_path + '.bak')
+        if os.path.exists(CONF_FILE_PATH):
+            # create a backup of the existing conf file - mostly for debugging/recovery
+            copy2(CONF_FILE_PATH, CONF_FILE_PATH + '.bak')
             logger.info('Successfully created conf file backup.')
         else:
             logger.critical('Could find specified conf file!')
             raise SystemExit(2)
     
-    #boolean 'true' or scan_mode specific activation
+    # boolean 'true' or scan_mode specific activation
     if DB_BACKUP == 'true' or DB_BACKUP == scan_mode:
-        if os.path.exists(db_file_path):
-            #create a backup of the existing db - mostly for debugging/recovery
-            copy2(db_file_path, db_file_path + '.bak')
+        if os.path.exists(DB_FILE_PATH):
+            # create a backup of the existing db - mostly for debugging/recovery
+            copy2(DB_FILE_PATH, DB_FILE_PATH + '.bak')
             logger.info('Successfully created db backup.')
         else:
             #subprocess.run(['python', 'gog_create_db.py'])
@@ -362,13 +361,12 @@ if __name__ == "__main__":
             logger.info(f'Restarting update scan from id: {last_id}.')
         
         try:
-            with requests.Session() as session, sqlite3.connect(db_file_path) as db_connection:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id > ? AND '
                                                   'gp_int_delisted IS NULL ORDER BY 1', (last_id,))
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
                 
-                #used to track the number of processed ids
                 last_id_counter = 0
                 
                 for id_entry in id_list:
@@ -394,17 +392,17 @@ if __name__ == "__main__":
                         
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_signal = True
                                 terminate_signal = True
                     
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
-                        configParser.read(conf_file_path)
+                        configParser.read(CONF_FILE_PATH)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
                         
-                        with open(conf_file_path, 'w') as file:
+                        with open(CONF_FILE_PATH, 'w') as file:
                             configParser.write(file)
                         
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
@@ -420,7 +418,7 @@ if __name__ == "__main__":
         logger.info('--- Running in REMOVED scan mode ---')
         
         try:
-            with sqlite3.connect(db_file_path) as db_connection:
+            with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT grt_int_id FROM gog_ratings WHERE grt_int_removed IS NOT NULL')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
@@ -448,7 +446,7 @@ if __name__ == "__main__":
                         
                         else:
                             retry_counter += 1
-                            #terminate the scan if the RETRY_COUNT limit is exceeded
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 logger.critical('Retry count exceeded, terminating scan!')
                                 fail_signal = True
@@ -463,14 +461,14 @@ if __name__ == "__main__":
     
     if not terminate_signal and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')
-        configParser.read(conf_file_path)
+        configParser.read(CONF_FILE_PATH)
         configParser['UPDATE_SCAN']['last_id'] = ''
         
-        with open(conf_file_path, 'w') as file:
+        with open(CONF_FILE_PATH, 'w') as file:
             configParser.write(file)
     
     logger.info('All done! Exiting...')
     
-    #return a non-zero exit code if a scan failure was encountered
+    # return a non-zero exit code if a scan failure was encountered
     if terminate_signal and fail_signal:
         raise SystemExit(4)
