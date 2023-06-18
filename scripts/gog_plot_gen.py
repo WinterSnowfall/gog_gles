@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.80
-@date: 12/06/2023
+@version: 3.90
+@date: 18/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -49,7 +49,8 @@ SUNSET_CHART_COLORS = ('purple', 'slateblue', 'goldenrod')
 FIRE_CHART_COLORS = ('darkred', 'darkorange', 'gold')
 DARKNESS_CHART_COLORS = ('black', 'slategray', 'lightgray')
 
-CHART_LABELS = ('Type: game', 'Type: dlc', 'Type: pack')
+PRODUCT_TYPES = ('GAME', 'DLC', 'PACK')
+CHART_LABELS = ('Type: GAME', 'Type: DLC', 'Type: PACK')
 
 TIMELINE_FIELDS = ('id', 'release date')
 TIMELINE_Y_OFFSETS = (ID_INTERVAL_LENGTH, timedelta(weeks=+28))
@@ -113,24 +114,24 @@ def plot_id_timeline(mode, timeline_field, plot_date, db_connection):
     pack_detection_date_list = []
     
     # in the interest of decompressing the chart, ignore the first 'CUTOFF_ID' IDs
-    db_cursor = db_connection.execute('SELECT gp_int_added, gp_id, gp_game_type, gp_v2_global_release_date FROM gog_products '
-                                      'WHERE gp_id > ? AND gp_int_added > ? AND gp_int_delisted IS NULL '
-                                      'ORDER BY 1', (CUTOFF_ID, CUTOFF_DATE))
+    db_cursor = db_connection.execute('SELECT gp_int_added, gp_id, gp_v2_product_type, gp_v2_global_release_date '
+                                      'FROM gog_products WHERE gp_id > ? AND gp_int_added > ? '
+                                      'AND gp_int_delisted IS NULL ORDER BY 1', (CUTOFF_ID, CUTOFF_DATE))
     
     for row in db_cursor:
         current_date = datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S.%f').date()
         logger.debug(f'current_date: {current_date}')
         current_id = row[1]
         logger.debug(f'current_id: {current_id}')
-        current_game_type = row[2]
-        logger.debug(f'current_game_type: {current_game_type}')
+        current_product_type = row[2]
+        logger.debug(f'current_product_type: {current_product_type}')
         try:
             current_release_date = datetime.strptime(row[3], '%Y-%m-%dT%H:%M:%S%z').date()
         except TypeError:
             current_release_date = None
         logger.debug(f'current_release_date: {current_release_date}')
         
-        if current_game_type == 'game':
+        if current_product_type == PRODUCT_TYPES[0]:
             if timeline_field == TIMELINE_FIELDS[0]:
                 game_detection_date_list.append(current_date)
                 game_list.append(current_id)
@@ -138,7 +139,7 @@ def plot_id_timeline(mode, timeline_field, plot_date, db_connection):
                 if current_release_date is not None:
                     game_detection_date_list.append(current_date)
                     game_list.append(current_release_date.replace(day=1))
-        elif current_game_type == 'dlc':
+        elif current_product_type == PRODUCT_TYPES[1]:
             if timeline_field == TIMELINE_FIELDS[0]:
                 dlc_detection_date_list.append(current_date)
                 dlc_list.append(current_id)
@@ -146,7 +147,7 @@ def plot_id_timeline(mode, timeline_field, plot_date, db_connection):
                 if current_release_date is not None:
                     dlc_detection_date_list.append(current_date)
                     dlc_list.append(current_release_date.replace(day=1))
-        elif current_game_type == 'pack':
+        elif current_product_type == PRODUCT_TYPES[2]:
             if timeline_field == TIMELINE_FIELDS[0]:
                 pack_detection_date_list.append(current_date)
                 pack_list.append(current_id)
@@ -234,26 +235,26 @@ def plot_id_distribution(mode, plot_date, db_connection):
     if mode == 'distribution':
         pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} '
                         f'ids (all ids) - {plot_date}')
-        db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
+        db_cursor = db_connection.execute('SELECT gp_id, gp_v2_product_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_delisted IS NULL ORDER BY 1', (CUTOFF_ID,))
     else:
         pyplot.suptitle(f'gog_gles - id distribution per intervals of {ID_INTERVAL_LENGTH} '
                         f'ids (incremental ids) - {plot_date}')
-        db_cursor = db_connection.execute('SELECT gp_id, gp_game_type FROM gog_products WHERE gp_id > ? '
+        db_cursor = db_connection.execute('SELECT gp_id, gp_v2_product_type FROM gog_products WHERE gp_id > ? '
                                           'AND gp_int_added > ? AND gp_int_delisted IS NULL ORDER BY 1',
                                           (CUTOFF_ID, CUTOFF_DATE))
     
     for row in db_cursor:
         current_id = row[0]
         logger.debug(f'current_id: {current_id}')
-        current_game_type = row[1]
-        logger.debug(f'current_game_type: {current_game_type}')
+        current_product_type = row[1]
+        logger.debug(f'current_product_type: {current_product_type}')
         
-        if current_game_type == 'game':
+        if current_product_type == PRODUCT_TYPES[0]:
             game_id_list.append(current_id)
-        elif current_game_type == 'dlc':
+        elif current_product_type == PRODUCT_TYPES[1]:
             dlc_id_list.append(current_id)
-        elif current_game_type == 'pack':
+        elif current_product_type == PRODUCT_TYPES[2]:
             pack_id_list.append(current_id)
     
     min_id = min(*game_id_list, *dlc_id_list, *pack_id_list)

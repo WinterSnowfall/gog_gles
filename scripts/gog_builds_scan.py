@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.80
-@date: 12/06/2023
+@version: 3.90
+@date: 18/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -572,19 +572,13 @@ if __name__ == "__main__":
     elif scan_mode == 'products':
         logger.info('--- Running in PRODUCTS scan mode ---')
         
-        # blank the filter for a really thorough scan, although it usually doesn't make sense (but not always,
-        # since some 'pack' and 'dlc' entries do have builds linked to them... hopefully just GOGBears tripping)
-        # GAME_TYPE_FILTER = ''
-        # filtering by game_type will drastically reduce the number of scanned ids
-        GAME_TYPE_FILTER = ' AND gp_game_type = \'game\''
-        
         try:
             with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 # select all existing ids from the gog_products table which are not already present in the 
                 # gog_builds table and atempt to scan them from matching builds API entries
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
-                                                  f'(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1)'
-                                                  f'{GAME_TYPE_FILTER} ORDER BY 1')
+                                                  '(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1)'
+                                                  'ORDER BY 1')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
                 

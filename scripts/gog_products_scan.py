@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.80
-@date: 12/06/2023
+@version: 3.90
+@date: 18/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -31,6 +31,7 @@ from logging.handlers import RotatingFileHandler
 
 # conf file block
 CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_products_scan.conf')
+MOVIES_ID_CSV_PATH = os.path.join('..', 'conf', 'gog_products_movie_ids.csv')
 
 # logging configuration block
 LOG_FILE_PATH = os.path.join('..', 'logs', 'gog_products_scan.log')
@@ -48,25 +49,19 @@ logger.addHandler(logger_file_handler)
 DB_FILE_PATH = os.path.join('..', 'output_db', 'gog_gles.db')
 
 # CONSTANTS
-INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
 UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
                    'gp_int_json_payload = ?, '
                    'gp_int_json_diff = ?, '
                    'gp_title = ?, '
-                   'gp_game_type = ?, '
-                   'gp_links_forum = ?, '
-                   'gp_links_product_card = ?, '
-                   'gp_links_support = ?, '
                    'gp_languages = ?, '
-                   'gp_description_lead = ?, '
-                   'gp_description_full = ?, '
-                   'gp_description_cool = ?, '
                    'gp_changelog = ? WHERE gp_id = ?')
 
 UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_int_v2_json_payload = ?, '
                       'gp_int_v2_json_diff = ?, '
+                      'gp_v2_product_type = ?, '
                       'gp_v2_developer = ?, '
                       'gp_v2_publisher = ?, '
                       'gp_v2_size = ?, '
@@ -83,7 +78,11 @@ UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_v2_properties = ?, '
                       'gp_v2_series = ?, '
                       'gp_v2_features = ?, '
-                      'gp_v2_is_using_dosbox = ? WHERE gp_id = ?')
+                      'gp_v2_is_using_dosbox = ?, ' 
+                      'gp_v2_links_store = ?, '
+                      'gp_v2_links_support = ?, '
+                      'gp_v2_links_forum = ?, '
+                      'gp_v2_description = ? WHERE gp_id = ?')
 
 INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
@@ -126,6 +125,13 @@ def sigint_handler(signum, frame):
     
     raise SystemExit(0)
 
+def parse_html_data(html_content):
+    # need to correct some GOG formatting wierdness by using regular expressions
+    html_content_parsed = ENDLINE_FIX_REGEX.sub('\n\n', html2text(html_content, bodywidth=0).strip())
+    if html_content_parsed == '': html_content_parsed = None
+    
+    return html_content_parsed
+
 def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection):
     
     product_url = f'https://api.gog.com/v2/games/{product_id}?locale=en-US'
@@ -165,6 +171,8 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 
                 # process product title (for loggers)
                 product_title = json_v2_parsed['_embedded']['product']['title'].strip()
+                # process product type
+                product_type = json_v2_parsed['_embedded']['productType']
                 # process developer/publisher
                 developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
                 publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
@@ -220,22 +228,35 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 if features == '': features = None
                 # process is_using_dosbox
                 is_using_dosbox = json_v2_parsed['isUsingDosBox']
+                # proces links
+                links_store = json_v2_parsed['_links']['store']['href']
+                links_support = json_v2_parsed['_links']['support']['href']
+                links_forum = json_v2_parsed['_links']['forum']['href']
+                # process description
+                try:
+                    description = parse_html_data(json_v2_parsed['description'])
+                except AttributeError:
+                    description = None
                 
                 with db_lock:
                     # gp_int_v2_updated, gp_int_v2_json_payload, gp_int_v2_previous_json_diff,
-                    # gp_v2_developer, gp_v2_publisher, gp_v2_size,
+                    # gp_v2_product_type, gp_v2_developer, gp_v2_publisher, gp_v2_size,
                     # gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable, 
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx, 
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
                     # gp_v2_tags, gp_v2_properties, gp_vs_series,
-                    # gp_v2_features, gp_v2_is_using_dosbox, gp_id (WHERE clause)
+                    # gp_v2_features, gp_v2_is_using_dosbox, 
+                    # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum, 
+                    # gp_v2_description, gp_id (WHERE clause)
                     db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now(), json_v2_formatted, diff_v2_formatted, 
-                                                           developer, publisher, size,
+                                                           product_type, developer, publisher, size,
                                                            is_preorder, in_development, is_installable,
                                                            os_support_windows, os_support_linux, os_support_osx, 
                                                            supported_os_versions, global_release_date, gog_release_date, 
                                                            tags, properties, series, 
-                                                           features, is_using_dosbox, product_id))
+                                                           features, is_using_dosbox, 
+                                                           links_store, links_support, links_forum, 
+                                                           description, product_id))
                     db_connection.commit()
                 
                 if existing_v2_json_formatted is not None:
@@ -263,8 +284,20 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
         raise
 
 def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, session, db_connection):
-    # unused additional expand options: expanded_dlcs, screenshots, videos
-    product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,related_products,changelog'
+    # determine if a certain product id can query the v2 endpoint (movies and certain 
+    # other ids will not get a valid v2 response, so querying it is useless)
+    if product_id in MOVIES_ID_LIST or product_id in NO_V2_ENDPOINT:
+        can_query_v2 = False
+    else:
+        can_query_v2 = True
+    
+    # there's no need to query the 'description' for regular ids, since it will be contained in the v2 data
+    if can_query_v2:
+        # unused additional expand options: description, expanded_dlcs, screenshots, videos
+        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,related_products,changelog'
+    else:
+        # unused additional expand options: expanded_dlcs, screenshots, videos
+        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,related_products,changelog'
     
     try:
         response = session.get(product_url, timeout=HTTP_TIMEOUT)
@@ -277,8 +310,6 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
             
             db_cursor = db_connection.execute('SELECT COUNT(*) FROM gog_products WHERE gp_id = ?', (product_id,))
             entry_count = db_cursor.fetchone()[0]
-            
-            is_movie = False
             
             # no need to do any processing if an entry is found in 'full' or 'builds' scan modes, 
             # since that entry will be skipped anyway
@@ -296,89 +327,68 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 # process unmodified fields
                 #product_id = json_parsed['id']
                 product_title = json_parsed['title'].strip()
-                game_type = json_parsed['game_type']
                 # process languages
                 if len(json_parsed['languages']) > 0:
                     languages = MVF_VALUE_SEPARATOR.join([''.join((language_key, ': ', json_parsed['languages'][language_key])) 
                                                           for language_key in json_parsed['languages'].keys()])
                 else:
                     languages = None
-                # process links
-                links_forum = json_parsed['links']['forum']
-                links_product_card = json_parsed['links']['product_card']
-                links_support = json_parsed['links']['support']
-                # need to correct some GOG formatting wierdness by using regular expressions
-                # process description
-                try:
-                    description_lead = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['description']['lead'], bodywidth=0).strip())
-                except AttributeError:
-                    description_lead = None
-                if description_lead == '': description_lead = None
-                try:
-                    description_full = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['description']['full'], bodywidth=0).strip())
-                except AttributeError:
-                    description_full = None
-                if description_full == '': description_full = None
-                # appears to be treated like a per row input for a HTML list shown on the product webpage
-                try:
-                    description_cool = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['description']['whats_cool_about_it']
-                                                                               .replace('\n', '<br><br>'), bodywidth=0).strip())
-                except AttributeError:
-                    description_cool = None
-                if description_cool == '': description_cool = None
                 # process changelog
                 try:
-                    changelog = ENDLINE_FIX_REGEX.sub('\n\n', html2text(json_parsed['changelog'], bodywidth=0).strip())
+                    changelog = parse_html_data(json_parsed['changelog'])
                 except AttributeError:
                     changelog = None
-                if changelog == '': changelog = None
                 
-                # detect if the entry is a movie based on the links_forum value and then on the content of the 
-                # lead description field, since the APIs ofer no discrimination (it's not pretty, but it works)
-                if ((links_forum == 'https://www.gog.com/forum/movies' or 
-                   (description_lead is not None and description_lead.startswith('IMDB rating:')) or 
-                   product_id in STATIC_MOVIES_ID_LIST) 
-                   and not product_id in STATIC_NON_MOVIES_ID_LIST):
-                    is_movie = True
-                    
-                # movies do not have a valid v2 product API entry, so parse the value for gp_v2_gog_release_date  
-                # now and also change the value of gp_game_type to 'movies' in order to better differentiate them 
-                # (it's set to 'game' for all movie ids by default, although that makes little sense)
-                if is_movie:
-                    game_type = 'movie'
+                if can_query_v2:
+                    product_type = None
+                    gog_release_date = None
+                    links_store = None
+                    links_support = None
+                    links_forum = None
+                    description = None
+                # change the value of gp_v2_product_type to 'MOVIES' in order to better differentiate them 
+                # (it's set to 'GAME' for all movie ids by default, although that makes little sense)
+                else:
+                    # the value stored here is the lowercase variant of productType in the v2 API payload
+                    product_type = 'MOVIE' if product_id in MOVIES_ID_LIST else json_parsed['game_type'].upper()
                     # the value stored here is identical to gogReleaseDate in the v2 API payload
                     gog_release_date = json_parsed['release_date']
-                else:
-                    gog_release_date = None
+                    # the value stored here is identical to store in the v2 API payload
+                    links_store = json_parsed['links']['product_card']
+                    # the value stored here is identical to support in the v2 API payload
+                    links_support = json_parsed['links']['support']
+                    # the value stored here is identical to forum in the v2 API payload
+                    links_forum = json_parsed['links']['forum']
+                    # the value stored here is mostly identical to Description in the v2 API payload
+                    try:
+                        description = parse_html_data(json_parsed['description']['full'])
+                    except AttributeError:
+                        description = None
             
             if entry_count == 0:
                 with db_lock:
                     # gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated, gp_int_json_payload, 
                     # gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload, gp_int_v2_json_diff, 
-                    # gp_id, gp_title, gp_game_type, gp_v2_developer, gp_v2_publisher, 
+                    # gp_id, gp_title, gp_v2_product_type, gp_v2_developer, gp_v2_publisher, 
                     # gp_v2_size, gp_v2_is_pre_order, gp_v2_in_development, gp_v2_is_installable, 
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx, 
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date, 
                     # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features, gp_v2_is_using_dosbox, 
-                    # gp_links_forum, gp_links_product_card, gp_links_support, 
-                    # gp_languages, gp_description_lead, gp_description_full, 
-                    # gp_description_cool, gp_changelog
+                    # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,  
+                    # gp_v2_description, gp_languages, gp_changelog
                     db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted, 
                                                         None, None, None, None, 
-                                                        product_id, product_title, game_type, None, None, 
+                                                        product_id, product_title, product_type, None, None, 
                                                         0, False, False, False, 
                                                         False, False, False, 
                                                         None, None, gog_release_date, 
                                                         None, None, None, None, False, 
-                                                        links_forum, links_product_card, links_support, 
-                                                        languages, description_lead, description_full, 
-                                                        description_cool, changelog))
+                                                        links_store, links_support, links_forum, 
+                                                        description, languages, changelog))
                     db_connection.commit()
                 logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title}.')
                 
-                # movies do not have a valid v2 product API entry
-                if not is_movie:
-                    # call the v2 api query to save the v2 json payload and populate developer/publisher values
+                if can_query_v2:
                     gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
             
             elif entry_count == 1:
@@ -411,21 +421,13 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                         
                         with db_lock:
                             # gp_int_updated, gp_int_json_payload, gp_int_json_diff, 
-                            # gp_title, gp_game_type, 
-                            # gp_links_forum, gp_links_product_card, gp_links_support, 
-                            # gp_languages, gp_description_lead, gp_description_full, 
-                            # gp_description_cool, gp_changelog, gp_id (WHERE clause)
+                            # gp_title, gp_languages, gp_changelog, gp_id (WHERE clause)
                             db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted, 
-                                                                product_title, game_type, 
-                                                                links_forum, links_product_card, links_support, 
-                                                                languages, description_lead, description_full, 
-                                                                description_cool, changelog, product_id))
+                                                                product_title, languages, changelog, product_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
                     
-                    # movies do not have a valid v2 product API entry
-                    if not is_movie:
-                        # call the v2 api query to save the v2 json payload and update developer/publisher values
+                    if can_query_v2:
                         gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
         
         # existing ids return a 404 HTTP error code on removal
@@ -951,15 +953,24 @@ if __name__ == "__main__":
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
         RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
-        # used as a workaround in movies detection logic - ids will always be treated as movies
-        STATIC_MOVIES_ID_LIST = [int(product_id.strip()) for product_id in 
-                                 general_section.get('static_movies_id_list').split(',')]
-        # used as a workaround in movies detection logic - ids will always be treated as non-movies
-        STATIC_NON_MOVIES_ID_LIST = [int(product_id.strip()) for product_id in 
-                                     general_section.get('static_non_movies_id_list').split(',')]
+        # ids that don't have a valid v2 endpoint for some reason
+        NO_V2_ENDPOINT = [int(product_id.strip()) for product_id in 
+                          general_section.get('no_v2_endpoint').split(',')]
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
+    
+    try:
+        # read a static list of movie ids from a csv file and use it to determine
+        # which entries should be treated as movies (movies have been more or less
+        # abandoned by GOG, so it's doubtful these ids will change going forward)
+        with open(MOVIES_ID_CSV_PATH, 'r') as file:
+            MOVIES_ID_LIST = [int(movie_id) for movie_id in file.read().split()]
+        
+        logger.debug(f'Read the following movie ids: {MOVIES_ID_LIST}')
+    except:
+        logger.critical('Could not parse movie ids csv file!')
+        raise SystemExit(2)
     
     logger.info('*** Running PRODUCTS scan script ***')
     
@@ -990,7 +1001,7 @@ if __name__ == "__main__":
             logger.info('Successfully created conf file backup.')
         else:
             logger.critical('Could find specified conf file!')
-            raise SystemExit(2)
+            raise SystemExit(3)
     
     # boolean 'true' or scan_mode specific activation
     if DB_BACKUP == 'true' or DB_BACKUP == scan_mode:
@@ -1001,7 +1012,7 @@ if __name__ == "__main__":
         else:
             #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
-            raise SystemExit(3)
+            raise SystemExit(4)
     
     # inter-process resources locks
     db_lock = multiprocessing.Lock()
@@ -1243,7 +1254,7 @@ if __name__ == "__main__":
             id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
         except ValueError:
             logger.critical('Could not parse id list!')
-            raise SystemExit(4)
+            raise SystemExit(5)
         
         try:
             with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
@@ -1400,4 +1411,4 @@ if __name__ == "__main__":
     
     # return a non-zero exit code if a scan failure was encountered
     if terminate_event.is_set() and fail_event.is_set():
-        raise SystemExit(5)
+        raise SystemExit(6)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.80
-@date: 12/06/2023
+@version: 3.90
+@date: 18/06/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -95,7 +95,7 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_int_v2_json_diff TEXT, '
                              'gp_id INTEGER UNIQUE NOT NULL, '
                              'gp_title TEXT NOT NULL, '
-                             'gp_game_type TEXT NOT NULL, '
+                             'gp_v2_product_type TEXT, '
                              'gp_v2_developer TEXT, '
                              'gp_v2_publisher TEXT, '
                              'gp_v2_size INTEGER NOT NULL, '
@@ -113,13 +113,11 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_v2_series TEXT, '
                              'gp_v2_features TEXT, '
                              'gp_v2_is_using_dosbox INTEGER NOT NULL, '
-                             'gp_links_forum TEXT, '
-                             'gp_links_product_card TEXT, '
-                             'gp_links_support TEXT, '
+                             'gp_v2_links_store TEXT, '
+                             'gp_v2_links_support TEXT, '
+                             'gp_v2_links_forum TEXT, '
+                             'gp_v2_description TEXT, '
                              'gp_languages TEXT, '
-                             'gp_description_lead TEXT, '
-                             'gp_description_full TEXT, '
-                             'gp_description_cool TEXT, '
                              'gp_changelog TEXT)')
 
 CREATE_GOG_RATINGS_QUERY = ('CREATE TABLE gog_ratings (grt_int_nr INTEGER PRIMARY KEY, '
