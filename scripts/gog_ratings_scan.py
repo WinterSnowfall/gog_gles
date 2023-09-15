@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.80
-@date: 12/06/2023
+@version: 3.92
+@date: 14/09/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -318,8 +318,8 @@ if __name__ == "__main__":
         
         if args.update:
             scan_mode = 'update'
-        elif args.archive:
-            scan_mode = 'archive'
+        elif args.removed:
+            scan_mode = 'removed'
     
     # boolean 'true' or scan_mode specific activation
     if CONF_BACKUP == 'true' or CONF_BACKUP == scan_mode:

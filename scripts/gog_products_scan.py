@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.90
-@date: 18/06/2023
+@version: 3.92
+@date: 14/09/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -914,12 +914,13 @@ if __name__ == "__main__":
                                                   'in order to retrieve product information and updates.'))
     
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('-n', '--new', help='Query new products', action='store_true')
-    group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
     group.add_argument('-f', '--full', help='Perform a full products scan using the Galaxy products endpoint', action='store_true')
-    group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
+    group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
+    group.add_argument('-n', '--new', help='Query new products', action='store_true')
     group.add_argument('-b', '--builds', help='Perform a product scan based on unknown builds', action='store_true')
+    group.add_argument('-r', '--releases', help='Perform a product scan based on missing external releases', action='store_true')
     group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
+    group.add_argument('-m', '--manual', help='Perform a manual products scan', action='store_true')
     group.add_argument('-d', '--delisted', help='Perform a scan on all the delisted products', action='store_true')
     
     args = parser.parse_args()
@@ -978,18 +979,20 @@ if __name__ == "__main__":
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
         
-        if args.new:
-            scan_mode = 'new'
+        if args.full:
+            scan_mode = 'full'
         elif args.update:
             scan_mode = 'update'
-        elif args.full:
-            scan_mode = 'full'
-        elif args.manual:
-            scan_mode = 'manual'
+        elif args.new:
+            scan_mode = 'new'
         elif args.builds:
             scan_mode = 'builds'
+        elif args.releases:
+            scan_mode = 'releases'
         elif args.extract:
             scan_mode = 'extract'
+        elif args.manual:
+            scan_mode = 'manual'
         elif args.delisted:
             scan_mode = 'delisted'
     
@@ -1240,6 +1243,115 @@ if __name__ == "__main__":
             terminate_event.set()
             logger.info('Stopping new scan...')
     
+    elif scan_mode == 'builds':
+        logger.info('--- Running in BUILDS scan mode ---')
+        
+        try:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
+                db_cursor = db_connection.execute('SELECT gb_int_id FROM gog_builds WHERE gb_int_title IS NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                
+                logger.debug('Retrieved all unidentified build product ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
+                        
+                        retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock, 
+                                                                      session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                fail_event.set()
+                                terminate_event.set()
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+        
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping builds scan...')
+    
+    elif scan_mode == 'releases':
+        logger.info('--- Running in RELEASES scan mode ---')
+        
+        try:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
+                db_cursor = db_connection.execute('SELECT gr_external_id FROM gog_releases WHERE gr_external_id NOT IN '
+                                                  '(SELECT gp_id FROM gog_products ORDER BY 1) ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                
+                logger.debug('Retrieved all missing external releases ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    retries_complete = False
+                    retry_counter = 0
+                    
+                    while not retries_complete and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing id {current_product_id}...')
+                        
+                        retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock, 
+                                                                      session, db_connection)
+                        
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for {current_product_id}.')
+                        else:
+                            retry_counter += 1
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                fail_event.set()
+                                terminate_event.set()
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+        
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping releases scan...')
+    
+    elif scan_mode == 'extract':
+        logger.info('--- Running in FILE EXTRACT scan mode ---')
+        
+        try:
+            with sqlite3.connect(DB_FILE_PATH) as db_connection:
+                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL ORDER BY 1')
+                id_list = db_cursor.fetchall()
+                logger.debug('Retrieved all existing product ids from the DB...')
+                
+                for id_entry in id_list:
+                    current_product_id = id_entry[0]
+                    logger.debug(f'Now processing id {current_product_id}...')
+                    
+                    gog_files_extract_parser(db_connection, current_product_id)
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+        
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping extract scan...')
+            
     elif scan_mode == 'manual':
         logger.info('--- Running in MANUAL scan mode ---')
         
@@ -1289,73 +1401,6 @@ if __name__ == "__main__":
         except SystemExit:
             terminate_event.set()
             logger.info('Stopping manual scan...')
-    
-    # run product scan against items that have no title linked to them in the builds table
-    elif scan_mode == 'builds':
-        logger.info('--- Running in BUILDS scan mode ---')
-        
-        try:
-            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
-                db_cursor = db_connection.execute('SELECT gb_int_id FROM gog_builds WHERE gb_int_title IS NULL ORDER BY 1')
-                id_list = db_cursor.fetchall()
-                
-                logger.debug('Retrieved all unidentified build product ids from the DB...')
-                
-                for id_entry in id_list:
-                    current_product_id = id_entry[0]
-                    logger.debug(f'Now processing id {current_product_id}...')
-                    retries_complete = False
-                    retry_counter = 0
-                    
-                    while not retries_complete and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                            sleep(RETRY_SLEEP_INTERVAL)
-                            logger.warning(f'Reprocessing id {current_product_id}...')
-                        
-                        retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock, 
-                                                                      session, db_connection)
-                        
-                        if retries_complete:
-                            if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-                        else:
-                            retry_counter += 1
-                            # terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                fail_event.set()
-                                terminate_event.set()
-                
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
-        
-        except SystemExit:
-            terminate_event.set()
-            logger.info('Stopping builds scan...')
-    
-    # extract file entries collected during the latest update runs
-    elif scan_mode == 'extract':
-        logger.info('--- Running in FILE EXTRACT scan mode ---')
-        
-        try:
-            with sqlite3.connect(DB_FILE_PATH) as db_connection:
-                db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_int_delisted IS NULL ORDER BY 1')
-                id_list = db_cursor.fetchall()
-                logger.debug('Retrieved all existing product ids from the DB...')
-                
-                for id_entry in id_list:
-                    current_product_id = id_entry[0]
-                    logger.debug(f'Now processing id {current_product_id}...')
-                    
-                    gog_files_extract_parser(db_connection, current_product_id)
-                
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
-        
-        except SystemExit:
-            terminate_event.set()
-            logger.info('Stopping extract scan...')
     
     elif scan_mode == 'delisted':
         logger.info('--- Running in DELISTED scan mode ---')

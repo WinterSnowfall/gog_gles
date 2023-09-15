@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.90
-@date: 18/06/2023
+@version: 3.92
+@date: 14/09/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -343,11 +343,11 @@ if __name__ == "__main__":
                                                   'in order to retrieve builds information and updates.'))
     
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('-u', '--update', help='Perform an update builds scan', action='store_true')
     group.add_argument('-f', '--full', help='Perform a full builds scan', action='store_true')
+    group.add_argument('-u', '--update', help='Perform an update builds scan', action='store_true')
     group.add_argument('-p', '--products', help='Perform a products-based builds scan', action='store_true')
-    group.add_argument('-m', '--manual', help='Perform a manual builds scan', action='store_true')
     group.add_argument('-d', '--delta', help='Produce a list of ids whose latest builds are exclusive to Galaxy', action='store_true')
+    group.add_argument('-m', '--manual', help='Perform a manual builds scan', action='store_true')
     group.add_argument('-r', '--removed', help='Perform a scan on all the removed builds', action='store_true')
     
     args = parser.parse_args()
@@ -391,16 +391,16 @@ if __name__ == "__main__":
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
         
-        if args.update:
-            scan_mode = 'update'
-        elif args.full:
+        if args.full:
             scan_mode = 'full'
+        elif args.update:
+            scan_mode = 'update'
         elif args.products:
             scan_mode = 'products'
-        elif args.manual:
-            scan_mode = 'manual'
         elif args.delta:
             scan_mode = 'delta'
+        elif args.manual:
+            scan_mode = 'manual'
         elif args.removed:
             scan_mode = 'removed'
     
@@ -572,13 +572,25 @@ if __name__ == "__main__":
     elif scan_mode == 'products':
         logger.info('--- Running in PRODUCTS scan mode ---')
         
+        products_scan_section = configParser['PRODUCTS_SCAN']
+        incremental_mode = products_scan_section.get('incremental_mode')
+        
+        # ignore the store value of last_timestamp if not in incremental mode
+        if incremental_mode:
+            last_timestamp = products_scan_section.get('last_timestamp')
+        else:
+            last_timestamp = ''
+            
+        if last_timestamp != '':
+            logger.info(f'Starting products scan from timestamp: {last_timestamp}.')
+        
         try:
             with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 # select all existing ids from the gog_products table which are not already present in the 
                 # gog_builds table and atempt to scan them from matching builds API entries
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
-                                                  '(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1)'
-                                                  'ORDER BY 1')
+                                                  '(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1) '
+                                                  'AND gp_int_added > ? ORDER BY 1', (last_timestamp, ))
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
                 
@@ -609,6 +621,9 @@ if __name__ == "__main__":
                                     logger.critical('Retry count exceeded, terminating scan!')
                                     fail_event.set()
                                     terminate_event.set()
+                                    
+                db_cursor = db_connection.execute('SELECT MAX(gp_int_added) FROM gog_products')
+                last_timestamp = db_cursor.fetchone()[0]
                 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -616,58 +631,6 @@ if __name__ == "__main__":
         except SystemExit:
             terminate_event.set()
             logger.info('Stopping products scan...')
-    
-    elif scan_mode == 'manual':
-        logger.info('--- Running in MANUAL scan mode ---')
-        
-        manual_scan_section = configParser['MANUAL_SCAN']
-        id_list = manual_scan_section.get('id_list')
-        
-        if id_list == '':
-            logger.warning('Nothing to scan!')
-            raise SystemExit(0)
-        
-        try:
-            id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
-        except ValueError:
-            logger.critical('Could not parse id list!')
-            raise SystemExit(4)
-        
-        try:
-            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
-                for product_id in id_list:
-                    logger.info(f'Running scan for id {product_id}...')
-
-                    for os_value in SUPPORTED_OSES:
-                        retries_complete = False
-                        retry_counter = 0
-                    
-                        while not retries_complete and not terminate_event.is_set():
-                            if retry_counter > 0:
-                                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                                sleep(RETRY_SLEEP_INTERVAL)
-                                logger.warning(f'Reprocessing id {product_id}...')
-                            
-                            retries_complete = gog_builds_query('', product_id, os_value, scan_mode, 
-                                                                db_lock, session, db_connection)
-                            
-                            if retries_complete:
-                                if retry_counter > 0:
-                                    logger.info(f'Succesfully retried for {product_id}, {os_value}.')
-                            else:
-                                retry_counter += 1
-                                # terminate the scan if the RETRY_COUNT limit is exceeded
-                                if retry_counter > RETRY_COUNT:
-                                    logger.critical('Retry count exceeded, terminating scan!')
-                                    fail_event.set()
-                                    terminate_event.set()
-                
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
-        
-        except SystemExit:
-            terminate_event.set()
-            logger.info('Stopping manual scan...')
     
     elif scan_mode == 'delta':
         logger.info('--- Running in DELTA scan mode ---')
@@ -857,6 +820,58 @@ if __name__ == "__main__":
             terminate_event.set()
             logger.info('Stopping delta scan...')
     
+    elif scan_mode == 'manual':
+        logger.info('--- Running in MANUAL scan mode ---')
+        
+        manual_scan_section = configParser['MANUAL_SCAN']
+        id_list = manual_scan_section.get('id_list')
+        
+        if id_list == '':
+            logger.warning('Nothing to scan!')
+            raise SystemExit(0)
+        
+        try:
+            id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
+        except ValueError:
+            logger.critical('Could not parse id list!')
+            raise SystemExit(4)
+        
+        try:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
+                for product_id in id_list:
+                    logger.info(f'Running scan for id {product_id}...')
+
+                    for os_value in SUPPORTED_OSES:
+                        retries_complete = False
+                        retry_counter = 0
+                    
+                        while not retries_complete and not terminate_event.is_set():
+                            if retry_counter > 0:
+                                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                                sleep(RETRY_SLEEP_INTERVAL)
+                                logger.warning(f'Reprocessing id {product_id}...')
+                            
+                            retries_complete = gog_builds_query('', product_id, os_value, scan_mode, 
+                                                                db_lock, session, db_connection)
+                            
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {product_id}, {os_value}.')
+                            else:
+                                retry_counter += 1
+                                # terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
+                                    terminate_event.set()
+                
+                logger.debug('Running PRAGMA optimize...')
+                db_connection.execute(OPTIMIZE_QUERY)
+        
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping manual scan...')
+            
     elif scan_mode == 'removed':
         logger.info('--- Running in REMOVED scan mode ---')
         
@@ -901,13 +916,24 @@ if __name__ == "__main__":
             terminate_event.set()
             logger.info('Stopping removed scan...')
     
-    if not terminate_event.is_set() and scan_mode == 'update':
-        logger.info('Resetting last_id parameter...')
-        configParser.read(CONF_FILE_PATH)
-        configParser['UPDATE_SCAN']['last_id'] = ''
-        
-        with open(CONF_FILE_PATH, 'w') as file:
-            configParser.write(file)
+    if not terminate_event.is_set():
+        if scan_mode == 'update':
+            logger.info('Resetting last_id parameter...')
+            configParser.read(CONF_FILE_PATH)
+            configParser['UPDATE_SCAN']['last_id'] = ''
+            
+            with open(CONF_FILE_PATH, 'w') as file:
+                configParser.write(file)
+            
+        elif scan_mode == 'products':
+            logger.info('Setting new last_timestamp value...')
+            configParser.read(CONF_FILE_PATH)
+            configParser['PRODUCTS_SCAN']['last_timestamp'] = last_timestamp
+            # also enable incremental mode for subsequent scans
+            configParser['PRODUCTS_SCAN']['incremental_mode'] = 'true'
+    
+            with open(CONF_FILE_PATH, 'w') as file:
+                configParser.write(file)
     
     logger.info('All done! Exiting...')
     
