@@ -72,9 +72,9 @@ All 3 database tables should be populated with data. This is essentially a snaps
 
 Assuming you've followed the steps described above, you are now ready to run update scans and detect any changes to product ids, associated installer/file entries, Galaxy builds and prices.
 
-All you need to do is run the provided update bash script:
+All you need to do is run the provided bash script:
 ```
-./gog_updates.sh
+./gog_gles.sh
 ```
 
 Wait for the script to finish collecting all the required data.
