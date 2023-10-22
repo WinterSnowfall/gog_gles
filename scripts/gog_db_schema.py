@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 3.92
-@date: 14/09/2023
+@version: 4.00
+@date: 22/10/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -154,31 +154,31 @@ CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMA
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=('GOG DB schema (part of gog_gles) - a script to create the sqlite DB structure '
                                                   'for the other gog_gles utilities and maintain it.'))
-    
+
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-c', '--create', help='Create the GOG DB and schema', action='store_true')
     group.add_argument('-v', '--vacuum', help='Vacuum (compact) the GOG DB', action='store_true')
-    
+
     args = parser.parse_args()
-    
+
     # set default operation mode
     db_mode = 'create';
-    
+
     # detect any parameter overrides and set the db_mode accordingly
     if len(argv) > 1:
         logger.info('Command-line parameter mode override detected.')
-        
+
         if args.create:
             db_mode = 'create'
         elif args.vacuum:
             db_mode = 'vacuum'
-    
+
     if db_mode == 'create':
         logger.info('--- Running in CREATE DB mode ---')
-        
+
         if not os.path.exists(DB_FILE_PATH):
             logger.info('No DB file detected. Creating new SQLite DB...')
-            
+
             with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.cursor()
                 db_cursor.execute(CREATE_GOG_BUILDS_QUERY)
@@ -194,22 +194,22 @@ if __name__ == "__main__":
                 db_cursor.execute(CREATE_GOG_RATINGS_QUERY)
                 db_cursor.execute(CREATE_GOG_RELEASES_QUERY)
                 db_connection.commit()
-            
+
             logger.info('DB created successfully.')
         else:
             logger.error('Existing DB file detected. Please delete the existing file if you are attempting to recreate the DB!')
 
     elif db_mode == 'vacuum':
         logger.info('--- Running in VACUUM DB mode ---')
-        
+
         if os.path.exists(DB_FILE_PATH):
             logger.info('DB file detected. Vacuuming the DB...')
-            
+
             with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.cursor()
                 db_cursor.execute('VACUUM')
                 db_connection.commit()
-                
+
             logger.info('Vacuuming completed.')
         else:
             logger.error('No DB file detected. Nothing to Vacuum!')
