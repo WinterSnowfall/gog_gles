@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.00
-@date: 22/10/2023
+@version: 4.02
+@date: 10/12/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -637,7 +637,9 @@ if __name__ == "__main__":
         logger.info('--- Running in DELTA scan mode ---')
 
         # strip any punctuation or other grouping characters from builds/versions
-        STRIP_OUT_LIST = [' ', ',', '.', '-', '_', '[', ']', '(', ')', '{', '}', '/', '\\']
+        STRIP_OUT_CHARS = [' ', ',', '.', '-', '_', '[', ']', '(', ')', '{', '}', '/', '\\']
+        # build a dictionary for translation-based removal
+        STRIP_OUT_DICT = {ord(strip_out_char): None for strip_out_char in STRIP_OUT_CHARS}
         # static regex pattern for removing end-of-string RC identifier from builds/installers
         GOG_RC_REMOVAL_REGEX = re.compile(r'RC[0-9]{1}$')
         # static regex pattern for removing end-of-string GOG version strings from builds/installers
@@ -704,9 +706,8 @@ if __name__ == "__main__":
                         current_latest_build_version = current_latest_build_version.replace('GOG HOTFIX', '')
 
                         # remove punctuation/formatting/grouping characters
-                        for stripped_item in STRIP_OUT_LIST:
-                            current_latest_build_version = current_latest_build_version.replace(stripped_item, '')
-                            current_latest_file_version = current_latest_file_version.replace(stripped_item, '')
+                        current_latest_build_version = current_latest_build_version.translate(STRIP_OUT_DICT)
+                        current_latest_file_version = current_latest_file_version.translate(STRIP_OUT_DICT)
 
                         # strip any version/build set that starts with the letter 'V'
                         if current_latest_build_version.startswith('V') and current_latest_file_version.startswith('V'):

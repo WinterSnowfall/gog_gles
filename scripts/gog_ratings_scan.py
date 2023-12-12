@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.00
-@date: 22/10/2023
+@version: 4.02
+@date: 10/12/2023
 
 Warning: Built for use with python 3.6+
 '''
@@ -418,7 +418,7 @@ if __name__ == "__main__":
         logger.info('--- Running in REMOVED scan mode ---')
 
         try:
-            with sqlite3.connect(DB_FILE_PATH) as db_connection:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 db_cursor = db_connection.execute('SELECT grt_int_id FROM gog_ratings WHERE grt_int_removed IS NOT NULL')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
