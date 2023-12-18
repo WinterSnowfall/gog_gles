@@ -442,8 +442,6 @@ if __name__ == "__main__":
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for {current_product_id}.')
 
-                            last_id_counter += 1
-
                         else:
                             retry_counter += 1
                             # terminate the scan if the RETRY_COUNT limit is exceeded

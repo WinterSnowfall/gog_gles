@@ -606,7 +606,7 @@ if __name__ == "__main__":
                         if retry_counter > 0:
                             logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                             sleep(RETRY_SLEEP_INTERVAL)
-                            logger.warning(f'Reprocessing id {current_product_id}...')
+                            logger.warning(f'Reprocessing id {product_id}...')
 
                         retries_complete = gog_releases_query('', product_id, scan_mode, db_lock,
                                                               session, db_connection)
