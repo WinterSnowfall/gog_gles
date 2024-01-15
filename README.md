@@ -23,7 +23,7 @@ cd scripts
 
 **4.** Create the gog_gles SQLite database, along with the appropriate tables and other artifacts, by running:
 ```
-python3 gog_create_db.py
+python3 gog_db_schema.py
 ```
 
 The database will be created in the *output_db* folder.
