@@ -147,9 +147,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
             # ignore unicode control characters which can be part of game descriptions and/or changelogs;
             # these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes
             # even with unicode conversions from and to the db... why do you do this, GOG, why???
-            filtered_response = response.text
-            for unicode_value in JSON_UNICODE_FILTERED_VALUES:
-                filtered_response = filtered_response.replace(unicode_value, '')
+            filtered_response = JSON_UNICODE_REMOVAL_REGEX.sub('', response.text)
 
             json_v2_parsed = json.loads(filtered_response, object_pairs_hook=OrderedDict)
             json_v2_formatted = json.dumps(json_v2_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
