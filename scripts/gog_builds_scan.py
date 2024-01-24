@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.02
-@date: 10/12/2023
+@version: 4.03
+@date: 24/01/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -553,7 +553,7 @@ if __name__ == "__main__":
                                     fail_event.set()
                                     terminate_event.set()
 
-                    if last_id_counter % ID_SAVE_FREQUENCY == 0 and not not terminate_event.is_set():
+                    if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
                         configParser.read(CONF_FILE_PATH)
                         configParser['UPDATE_SCAN']['last_id'] = str(current_product_id)
 
