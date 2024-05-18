@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.03
-@date: 24/01/2024
+@version: 4.04
+@date: 18/05/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -864,7 +864,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                     if retry_counter > 0:
                         logger.debug(f'{process_tag}>>> Retry count: {retry_counter}.')
                         # main iteration incremental sleep
-                        sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
+                        sleep((INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
 
                         retries_complete = gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock,
                                                                    processSession, process_db_connection)
@@ -952,7 +952,7 @@ if __name__ == "__main__":
         HTTP_TIMEOUT = general_section.getint('http_timeout')
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
-        RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
+        INCREMENTAL_RETRY_BASE = general_section.getint('incremental_retry_base')
         # ids that don't have a valid v2 endpoint for some reason
         NO_V2_ENDPOINT = [int(product_id.strip()) for product_id in
                           general_section.get('no_v2_endpoint').split(',')]

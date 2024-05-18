@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.03
-@date: 24/01/2024
+@version: 4.04
+@date: 18/05/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -246,7 +246,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                     if retry_counter > 0:
                         logger.debug(f'{process_tag}>>> Retry count: {retry_counter}.')
                         # main iteration incremental sleep
-                        sleep((retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL)
+                        sleep((INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
 
                     retries_complete = gog_releases_query(process_tag, product_id, scan_mode, db_lock,
                                                           processSession, process_db_connection)
@@ -331,7 +331,7 @@ if __name__ == "__main__":
         HTTP_TIMEOUT = general_section.getint('http_timeout')
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
-        RETRY_AMPLIFICATION_FACTOR = general_section.getint('retry_amplification_factor')
+        INCREMENTAL_RETRY_BASE = general_section.getint('incremental_retry_base')
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
@@ -551,7 +551,7 @@ if __name__ == "__main__":
 
                     while not retries_complete and not terminate_event.is_set():
                         if retry_counter > 0:
-                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                            sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
                             logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                             sleep(sleep_interval)
 
@@ -648,7 +648,7 @@ if __name__ == "__main__":
 
                     while not retries_complete and not terminate_event.is_set():
                         if retry_counter > 0:
-                            sleep_interval = (retry_counter ** RETRY_AMPLIFICATION_FACTOR) * RETRY_SLEEP_INTERVAL
+                            sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
                             logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                             sleep(sleep_interval)
 
