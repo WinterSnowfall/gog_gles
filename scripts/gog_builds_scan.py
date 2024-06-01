@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.04
-@date: 18/05/2024
+@version: 4.05
+@date: 30/05/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -572,26 +572,13 @@ if __name__ == "__main__":
     elif scan_mode == 'products':
         logger.info('--- Running in PRODUCTS scan mode ---')
 
-        products_scan_section = configParser['PRODUCTS_SCAN']
-        incremental_mode = products_scan_section.get('incremental_mode')
-
-        # ignore the store value of last_timestamp if not in incremental mode
-        if incremental_mode:
-            last_timestamp = products_scan_section.get('last_timestamp')
-        else:
-            last_timestamp = ''
-
-        if last_timestamp != '':
-            logger.info(f'Starting products scan from timestamp: {last_timestamp}.')
-
         try:
             with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
                 # select all existing ids from the gog_products table which are not already present in the
                 # gog_builds table and atempt to scan them from matching builds API entries
                 db_cursor = db_connection.execute('SELECT gp_id FROM gog_products WHERE gp_id NOT IN '
                                                   '(SELECT DISTINCT gb_int_id FROM gog_builds ORDER BY 1) '
-                                                  'AND (gp_int_added > ? OR gp_int_updated > ?) ORDER BY 1',
-                                                  (last_timestamp, last_timestamp))
+                                                  'ORDER BY 1')
                 id_list = db_cursor.fetchall()
                 logger.debug('Retrieved all applicable product ids from the DB...')
 
@@ -622,9 +609,6 @@ if __name__ == "__main__":
                                     logger.critical('Retry count exceeded, terminating scan!')
                                     fail_event.set()
                                     terminate_event.set()
-
-                db_cursor = db_connection.execute('SELECT MAX(MAX(gp_int_added), MAX(gp_int_updated)) FROM gog_products')
-                last_timestamp = db_cursor.fetchone()[0]
 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -918,24 +902,13 @@ if __name__ == "__main__":
             terminate_event.set()
             logger.info('Stopping removed scan...')
 
-    if not terminate_event.is_set():
-        if scan_mode == 'update':
-            logger.info('Resetting last_id parameter...')
-            configParser.read(CONF_FILE_PATH)
-            configParser['UPDATE_SCAN']['last_id'] = ''
+    if not terminate_event.is_set() and scan_mode == 'update':
+        logger.info('Resetting last_id parameter...')
+        configParser.read(CONF_FILE_PATH)
+        configParser['UPDATE_SCAN']['last_id'] = ''
 
-            with open(CONF_FILE_PATH, 'w') as file:
-                configParser.write(file)
-
-        elif scan_mode == 'products':
-            logger.info('Setting new last_timestamp value...')
-            configParser.read(CONF_FILE_PATH)
-            configParser['PRODUCTS_SCAN']['last_timestamp'] = last_timestamp
-            # also enable incremental mode for subsequent scans
-            configParser['PRODUCTS_SCAN']['incremental_mode'] = 'true'
-
-            with open(CONF_FILE_PATH, 'w') as file:
-                configParser.write(file)
+        with open(CONF_FILE_PATH, 'w') as file:
+            configParser.write(file)
 
     logger.info('All done! Exiting...')
 
