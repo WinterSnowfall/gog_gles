@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.05
-@date: 30/05/2024
+@version: 4.06
+@date: 10/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -164,14 +164,14 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
                     product_name = result[0] if result is not None else None
 
                 if entry_count == 0:
-                    # gb_int_nr, gb_int_added, gb_int_removed, gb_int_updated, gb_int_json_payload,
-                    # gb_int_json_diff, gb_int_id, gb_int_title, gb_int_os,
-                    # gb_total_count, gb_count, gb_main_version_names,
+                    # gb_int_nr, gb_int_added, gb_int_removed, gb_int_updated,
+                    # gb_int_json_payload, gb_int_json_diff, gb_int_id, gb_int_title,
+                    # gb_int_os, gb_total_count, gb_count, gb_main_version_names,
                     # gb_branch_version_names, gb_has_private_branches
                     with db_lock:
-                        db_cursor.execute(INSERT_BUILD_QUERY, (None, datetime.now(), None, None, json_formatted,
-                                                               None, product_id, product_name, os_value,
-                                                               total_count, count, main_version_names,
+                        db_cursor.execute(INSERT_BUILD_QUERY, (None, datetime.now().isoformat(' '), None, None,
+                                                               json_formatted, None, product_id, product_name,
+                                                               os_value, total_count, count, main_version_names,
                                                                branch_version_names, has_private_branches))
                         db_connection.commit()
                     logger.info(f'{process_tag}BQ +++ Added a new DB entry for {product_id}: {product_name}, {os_value}.')
@@ -214,7 +214,7 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
                             # gb_total_count, gb_count, gb_main_version_names, gb_branch_version_names,
                             # gb_has_private_branches, gb_id (WHERE clause), gb_os (WHERE clause)
                             with db_lock:
-                                db_cursor.execute(UPDATE_BUILD_QUERY, (datetime.now(), json_formatted, diff_formatted,
+                                db_cursor.execute(UPDATE_BUILD_QUERY, (datetime.now().isoformat(' '), json_formatted, diff_formatted,
                                                                        total_count, count, main_version_names, branch_version_names,
                                                                        has_private_branches, product_id, os_value))
                                 db_connection.commit()
@@ -240,7 +240,7 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
                             # previous values will still be stored as part of the attached json payload
                             db_cursor.execute('UPDATE gog_builds SET gb_int_removed = ?, gb_int_json_diff = NULL, gb_total_count = 0, gb_count = 0, '
                                               'gb_main_version_names = NULL, gb_branch_version_names = NULL, gb_has_private_branches = 0 '
-                                              'WHERE gb_int_id = ? AND gb_int_os = ?', (datetime.now(), product_id, os_value))
+                                              'WHERE gb_int_id = ? AND gb_int_os = ?', (datetime.now().isoformat(' '), product_id, os_value))
                             db_connection.commit()
                         logger.warning(f'{process_tag}BQ --- Marked the builds for {product_id}, {os_value}: {product_name} as removed.')
                     else:
@@ -753,7 +753,7 @@ if __name__ == "__main__":
                                     logger.debug(f'Found outdated discrepancy for {current_product_id}: {current_product_title}, {current_os_value}.')
                                     # gid_int_updated, gid_int_latest_galaxy_build,
                                     # gid_int_latest_installer_version, gid_int_id, gid_int_os
-                                    db_cursor.execute(UPDATE_INSTALLERS_DELTA_QUERY, (datetime.now(), current_latest_build_version_orig,
+                                    db_cursor.execute(UPDATE_INSTALLERS_DELTA_QUERY, (datetime.now().isoformat(' '), current_latest_build_version_orig,
                                                                                       current_latest_file_version_orig, current_product_id, current_os_value))
                                     db_connection.commit()
                                     logger.info(f'~~~ Successfully updated the entry for {current_product_id}: {current_product_title}, {current_os_value}.')
@@ -772,7 +772,7 @@ if __name__ == "__main__":
                                 # gid_int_nr, gid_int_added, gid_int_fixed, gid_int_updated, gid_int_id, gid_int_title,
                                 # gid_int_os, gid_int_latest_galaxy_build, gid_int_latest_installer_version,
                                 # gid_int_false_positive, gid_int_false_positive_reason
-                                db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now(), None, None, current_product_id, current_product_title,
+                                db_cursor.execute(INSERT_INSTALLERS_DELTA_QUERY, (None, datetime.now().isoformat(' '), None, None, current_product_id, current_product_title,
                                                                                   current_os_value, current_latest_build_version_orig, current_latest_file_version_orig,
                                                                                   current_false_positive, None))
                                 db_connection.commit()
@@ -795,7 +795,7 @@ if __name__ == "__main__":
                         # also clear any existing manually set reason if a false positive entry is marked as resolved
                         db_cursor.execute('UPDATE gog_installers_delta SET gid_int_fixed = ?, gid_int_false_positive = 0, gid_int_false_positive_reason = NULL '
                                           'WHERE gid_int_id = ? AND gid_int_os = ? AND gid_int_fixed IS NULL',
-                                          (datetime.now(), current_product_id, current_os_value))
+                                          (datetime.now().isoformat(' '), current_product_id, current_os_value))
                         db_connection.commit()
                         logger.info(f'--- Successfully updated fixed status for {current_product_id}: {current_product_title}, {current_os_value}.')
 

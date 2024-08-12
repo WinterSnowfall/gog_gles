@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.05
-@date: 30/05/2024
+@version: 4.06
+@date: 10/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -113,13 +113,14 @@ def gog_prices_query(product_id, country_code, currencies_list, session, db_conn
 
                             if previous_entries == 1:
                                 db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated = ? WHERE gpr_int_id = ? AND gpr_int_outdated IS NULL '
-                                                  'AND gpr_int_country_code = ? AND gpr_currency = ?', (datetime.now(), product_id, country_code, currency))
+                                                  'AND gpr_int_country_code = ? AND gpr_currency = ?',
+                                                  (datetime.now().isoformat(' '), product_id, country_code, currency))
                                 db_connection.commit()
                                 logger.debug(f'PQ ~~~ Succesfully outdated the previous DB entry for {product_id}: {product_title}, {country_code}, {currency}.')
 
                             # gpr_int_nr, gpr_int_added, gpr_int_outdated, gpr_int_id, gpr_int_title,
                             # gpr_int_country_code, gpr_currency, gpr_base_price, gpr_final_price
-                            db_cursor.execute(INSERT_PRICES_QUERY, (None, datetime.now(), None, product_id, product_title,
+                            db_cursor.execute(INSERT_PRICES_QUERY, (None, datetime.now().isoformat(' '), None, product_id, product_title,
                                                                     country_code, currency, base_price, final_price))
                             db_connection.commit()
                             logger.info(f'PQ +++ Added a DB entry for {product_id}: {product_title}, {country_code}, {currency}.')
@@ -331,7 +332,7 @@ if __name__ == "__main__":
                     logger.debug(f'Now processing id {current_product_id}...')
 
                     db_cursor.execute('UPDATE gog_prices SET gpr_int_outdated = ? WHERE gpr_int_id = ? AND gpr_int_outdated IS NULL '
-                                      'AND gpr_int_country_code = ?', (datetime.now(), current_product_id, COUNTRY_CODE))
+                                      'AND gpr_int_country_code = ?', (datetime.now().isoformat(' '), current_product_id, COUNTRY_CODE))
                     logger.info(f'Succesfully outdated the DB entry for {current_product_id}: {current_product_title}, {COUNTRY_CODE}, all currencies.')
 
                 db_connection.commit()

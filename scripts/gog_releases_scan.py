@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.05
-@date: 30/05/2024
+@version: 4.06
+@date: 10/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -129,14 +129,14 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
 
             if entry_count == 0:
                 with db_lock:
-                    # gr_int_nr, gr_int_added, gr_int_delisted, gr_int_updated, gr_int_json_payload,
-                    # gr_int_json_diff, gr_external_id, gr_title, gr_type,
-                    # gr_supported_oses, gr_genres, gr_series, gr_first_release_date,
-                    # gr_visible_in_library, gr_aggregated_rating
-                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted,
-                                                        None, release_id, release_title, release_type,
-                                                        supported_oses, genres, series, first_release_date,
-                                                        visible_in_library, aggregated_rating))
+                    # gr_int_nr, gr_int_added, gr_int_delisted, gr_int_updated,
+                    # gr_int_json_payload, gr_int_json_diff, gr_external_id, gr_title,
+                    # gr_type, gr_supported_oses, gr_genres, gr_series,
+                    # gr_first_release_date, gr_visible_in_library, gr_aggregated_rating
+                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now().isoformat(' '), None, None,
+                                                        json_formatted, None, release_id, release_title,
+                                                        release_type, supported_oses, genres, series,
+                                                        first_release_date, visible_in_library, aggregated_rating))
                     db_connection.commit()
                 logger.info(f'{process_tag}RQ +++ Added a new DB entry for {release_id}: {release_title}.')
 
@@ -169,12 +169,12 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
                             diff_formatted = None
 
                         with db_lock:
-                            # gr_int_updated, gr_int_json_payload, gr_int_json_diff, gr_title,
-                            # gr_type, gr_supported_oses, gr_genres, gr_series, gr_first_release_date,
-                            # gr_visible_in_library, gr_aggregated_rating, gr_external_id (WHERE clause)
-                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted, release_title,
-                                                                release_type, supported_oses, genres, series, first_release_date,
-                                                                visible_in_library, aggregated_rating, release_id))
+                            # gr_int_updated, gr_int_json_payload, gr_int_json_diff,
+                            # gr_title, gr_type, gr_supported_oses, gr_genres, gr_series, 
+                            # gr_first_release_date, gr_visible_in_library, gr_aggregated_rating, gr_external_id (WHERE clause)
+                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted, diff_formatted,
+                                                                release_title, release_type, supported_oses, genres, series,
+                                                                first_release_date, visible_in_library, aggregated_rating, release_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}RQ ~~~ Updated the DB entry for {release_id}: {release_title}.')
 
@@ -190,7 +190,7 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
                 with db_lock:
                     # also clear diff field when marking a release as delisted
                     db_cursor.execute('UPDATE gog_releases SET gr_int_delisted = ?, gr_int_json_diff = NULL '
-                                      'WHERE gr_external_id = ?', (datetime.now(), release_id))
+                                      'WHERE gr_external_id = ?', (datetime.now().isoformat(' '), release_id))
                     db_connection.commit()
                 logger.info(f'{process_tag}RQ --- Delisted the DB entry for: {release_id}: {release_title}.')
             else:

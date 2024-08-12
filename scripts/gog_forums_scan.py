@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.05
-@date: 30/05/2024
+@version: 4.06
+@date: 10/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -85,7 +85,7 @@ def gog_forums_query(session, db_connection):
 
                 if entry_count == 0:
                     # gfr_int_nr, gfr_int_added, gfr_int_removed, gfr_name, gfr_link
-                    db_cursor.execute(INSERT_FORUM_QUERY, (None, datetime.now(), None, forum_name, forum_link))
+                    db_cursor.execute(INSERT_FORUM_QUERY, (None, datetime.now().isoformat(' '), None, forum_name, forum_link))
                     db_connection.commit()
                     logger.info(f'FRQ +++ Added a new DB entry for {forum_name}.')
 
@@ -123,7 +123,8 @@ def gog_forums_query(session, db_connection):
 
                 for forum_name in forum_name_list:
                     logger.debug(f'FRQ >>> Forum {forum_name} has been removed...')
-                    db_cursor.execute('UPDATE gog_forums SET gfr_int_removed = ? WHERE gfr_name = ?', (datetime.now(), forum_name))
+                    db_cursor.execute('UPDATE gog_forums SET gfr_int_removed = ? WHERE gfr_name = ?',
+                                      (datetime.now().isoformat(' '), forum_name))
                     db_connection.commit()
                     logger.warning(f'FRQ --- Marked the DB entry for {forum_name} as removed.')
 

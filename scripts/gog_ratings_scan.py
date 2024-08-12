@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.05
-@date: 30/05/2024
+@version: 4.06
+@date: 10/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -170,7 +170,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     # grt_int_json_diff, grt_int_id, grt_int_title, grt_review_count,
                     # grt_avg_rating, grt_avg_rating_count, grt_avg_rating_verified_owner,
                     # grt_avg_rating_verified_owner_count, grt_is_reviewable
-                    db_cursor.execute(INSERT_RATING_QUERY, (None, datetime.now(), None, None, json_formatted,
+                    db_cursor.execute(INSERT_RATING_QUERY, (None, datetime.now().isoformat(' '), None, None, json_formatted,
                                                             None, product_id, product_title, review_count,
                                                             avg_rating, avg_rating_count, avg_rating_verified_owner,
                                                             avg_rating_verified_owner_count, is_reviewable))
@@ -209,7 +209,7 @@ def gog_reviews_query(product_id, session, db_connection):
                         # grt_int_updated, grt_int_json_payload, grt_int_json_diff,
                         # grt_review_count, grt_avg_rating, grt_avg_rating_count, grt_avg_rating_verified_owner,
                         # grt_avg_rating_verified_owner_count, grt_is_reviewable, grt_int_id (WHERE clause)
-                        db_cursor.execute(UPDATE_RATING_QUERY, (datetime.now(), json_formatted, diff_formatted,
+                        db_cursor.execute(UPDATE_RATING_QUERY, (datetime.now().isoformat(' '), json_formatted, diff_formatted,
                                                                 review_count, avg_rating, avg_rating_count, avg_rating_verified_owner,
                                                                 avg_rating_verified_owner_count, is_reviewable, product_id))
                         db_connection.commit()
@@ -227,7 +227,7 @@ def gog_reviews_query(product_id, session, db_connection):
                         logger.debug(f'RVQ >>> Rating for {product_id} has been removed...')
                         # also clear diff field when marking a rating as removed
                         db_cursor.execute('UPDATE gog_ratings SET grt_int_removed = ?, grt_int_json_diff = NULL '
-                                            'WHERE grt_int_id = ?', (datetime.now(), product_id))
+                                          'WHERE grt_int_id = ?', (datetime.now().isoformat(' '), product_id))
                         db_connection.commit()
                         logger.info(f'RVQ --- Marked the DB entry for: {product_id}: {product_title} as removed.')
                     else:

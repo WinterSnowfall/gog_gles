@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.05
-@date: 30/05/2024
+@version: 4.06
+@date: 10/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -240,18 +240,18 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                     description = None
 
                 with db_lock:
-                    # gp_int_v2_updated, gp_int_v2_json_payload, gp_int_v2_previous_json_diff,
-                    # gp_v2_product_type, gp_v2_developer, gp_v2_publisher, gp_v2_size,
-                    # gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
+                    # gp_int_v2_updated, gp_int_v2_json_payload,
+                    # gp_int_v2_previous_json_diff, gp_v2_product_type, gp_v2_developer, gp_v2_publisher,
+                    # gp_v2_size, gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
                     # gp_v2_tags, gp_v2_properties, gp_vs_series,
                     # gp_v2_features, gp_v2_is_using_dosbox,
                     # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
                     # gp_v2_description, gp_id (WHERE clause)
-                    db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now(), json_v2_formatted, diff_v2_formatted,
-                                                           product_type, developer, publisher, size,
-                                                           is_preorder, in_development, is_installable,
+                    db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now().isoformat(' '), json_v2_formatted,
+                                                           diff_v2_formatted, product_type, developer, publisher,
+                                                           size, is_preorder, in_development, is_installable,
                                                            os_support_windows, os_support_linux, os_support_osx,
                                                            supported_os_versions, global_release_date, gog_release_date,
                                                            tags, properties, series,
@@ -366,18 +366,18 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
 
             if entry_count == 0:
                 with db_lock:
-                    # gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated, gp_int_json_payload,
-                    # gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload, gp_int_v2_json_diff,
-                    # gp_id, gp_title, gp_v2_product_type, gp_v2_developer, gp_v2_publisher,
+                    # gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated,
+                    # gp_int_json_payload, gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload,
+                    # gp_int_v2_json_diff, gp_id, gp_title, gp_v2_product_type, gp_v2_developer, gp_v2_publisher,
                     # gp_v2_size, gp_v2_is_pre_order, gp_v2_in_development, gp_v2_is_installable,
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
                     # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features, gp_v2_is_using_dosbox,
                     # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
                     # gp_v2_description, gp_languages, gp_changelog
-                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now(), None, None, json_formatted,
-                                                        None, None, None, None,
-                                                        product_id, product_title, product_type, None, None,
+                    db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now().isoformat(' '), None, None,
+                                                        json_formatted, None, None, None,
+                                                        None, product_id, product_title, product_type, None, None,
                                                         0, False, False, False,
                                                         False, False, False,
                                                         None, None, gog_release_date,
@@ -421,7 +421,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                         with db_lock:
                             # gp_int_updated, gp_int_json_payload, gp_int_json_diff,
                             # gp_title, gp_languages, gp_changelog, gp_id (WHERE clause)
-                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now(), json_formatted, diff_formatted,
+                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted, diff_formatted,
                                                                 product_title, languages, changelog, product_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
@@ -440,7 +440,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 with db_lock:
                     # also clear diff fields when marking a product as delisted
                     db_cursor.execute('UPDATE gog_products SET gp_int_delisted = ?, gp_int_json_diff = NULL, gp_int_v2_json_diff = NULL '
-                                      'WHERE gp_id = ?', (datetime.now(), product_id))
+                                      'WHERE gp_id = ?', (datetime.now().isoformat(' '), product_id))
                     db_connection.commit()
                 logger.warning(f'{process_tag}PQ --- Delisted the DB entry for: {product_id}: {product_title}.')
             else:
@@ -608,7 +608,7 @@ def gog_files_extract_parser(db_connection, product_id):
                 # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
                 # gf_id, gf_name, gf_os, gf_language, gf_version,
                 # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'installer',
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now().isoformat(' '), None, product_id, 'installer',
                                                        installer_id, installer_product_name, installer_os, installer_language, installer_version,
                                                        None, None, installer_total_size, installer_file_id, installer_file_size))
                 # no need to print the os here, as it's included in the installer_id
@@ -620,7 +620,8 @@ def gog_files_extract_parser(db_connection, product_id):
 
     if len(listed_installer_pks) > 0:
         for removed_pk in listed_installer_pks:
-            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL',
+                              (datetime.now().isoformat(' '), removed_pk))
 
         logger.info(f'FQ --- Marked some installer entries as removed for {product_id}')
 
@@ -661,7 +662,7 @@ def gog_files_extract_parser(db_connection, product_id):
                 # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
                 # gf_id, gf_name, gf_os, gf_language, gf_version,
                 # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'patch',
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now().isoformat(' '), None, product_id, 'patch',
                                                        patch_id, patch_product_name, patch_os, patch_language, patch_version,
                                                        None, None, patch_total_size, patch_file_id, patch_file_size))
                 # no need to print the os here, as it's included in the patch_id
@@ -673,7 +674,8 @@ def gog_files_extract_parser(db_connection, product_id):
 
     if len(listed_patch_pks) > 0:
         for removed_pk in listed_patch_pks:
-            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL',
+                              (datetime.now().isoformat(' '), removed_pk))
 
         logger.info(f'FQ --- Marked some patch entries as removed for {product_id}')
 
@@ -714,7 +716,7 @@ def gog_files_extract_parser(db_connection, product_id):
                 # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type, gf_id,
                 # gf_name, gf_os, gf_language, gf_version,
                 # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'language_packs', language_pack_id,
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now().isoformat(' '), None, product_id, 'language_packs', language_pack_id,
                                                        language_pack_product_name, language_pack_os, language_pack_language, language_pack_version,
                                                        None, None, language_pack_total_size, language_pack_file_id, language_pack_file_size))
                 # no need to print the os here, as it's included in the patch_id
@@ -726,7 +728,8 @@ def gog_files_extract_parser(db_connection, product_id):
 
     if len(listed_language_packs_pks) > 0:
         for removed_pk in listed_language_packs_pks:
-            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL',
+                              (datetime.now().isoformat(' '), removed_pk))
 
         logger.info(f'FQ --- Marked some language_pack entries as removed for {product_id}')
 
@@ -757,7 +760,7 @@ def gog_files_extract_parser(db_connection, product_id):
                 # gf_int_nr, gf_int_added, gf_int_removed, gf_int_id, gf_int_download_type,
                 # gf_id, gf_name, gf_os, gf_language, gf_version,
                 # gf_type, gf_count, gf_total_size, gf_file_id, gf_file_size
-                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now(), None, product_id, 'bonus_content',
+                db_cursor.execute(INSERT_FILES_QUERY, (None, datetime.now().isoformat(' '), None, product_id, 'bonus_content',
                                                        bonus_content_id, bonus_content_product_name, None, None, None,
                                                        bonus_content_type, bonus_content_count, bonus_content_total_size,
                                                        bonus_content_file_id, bonus_content_file_size))
@@ -770,7 +773,8 @@ def gog_files_extract_parser(db_connection, product_id):
 
     if len(listed_bonus_content_pks) > 0:
         for removed_pk in listed_bonus_content_pks:
-            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL', (datetime.now(), removed_pk))
+            db_cursor.execute('UPDATE gog_files SET gf_int_removed = ? WHERE gf_int_nr = ? AND gf_int_removed IS NULL',
+                              (datetime.now().isoformat(' '), removed_pk))
 
         logger.info(f'FQ --- Marked some bonus_content entries as removed for {product_id}')
 
