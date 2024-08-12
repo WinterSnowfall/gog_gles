@@ -75,7 +75,7 @@ def plot_id_timeline(mode, timeline_field, plot_date, db_connection):
                    f'(with {timeline_field} / detection date histograms) - {plot_date}')
     timeline_field_nowhitespace = timeline_field.replace(' ', '_')
     window_title = f'gog_{mode}_{timeline_field_nowhitespace}'
-    pyplot.gcf().canvas.set_window_title(window_title)
+    pyplot.gcf().canvas.manager.set_window_title(window_title)
     pyplot.gcf().set_size_inches(PNG_WIDTH_INCHES, PNG_HEIGHT_INCHES)
 
     # generate gridspec and subplots on a 1/6 ratio
@@ -209,7 +209,7 @@ def plot_id_distribution(mode, plot_date, db_connection):
     signal.signal(signal.SIGINT, sigint_handler)
 
     window_title = f'gog_{mode}'
-    pyplot.gcf().canvas.set_window_title(window_title)
+    pyplot.gcf().canvas.manager.set_window_title(window_title)
     pyplot.gcf().set_size_inches(PNG_WIDTH_INCHES, PNG_HEIGHT_INCHES)
 
     x_formatter = ScalarFormatter(useOffset=False)
