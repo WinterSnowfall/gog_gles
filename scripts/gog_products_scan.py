@@ -200,11 +200,15 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                                                                  if os_value['operatingSystem']['versions'] != '')
                 # process global release date
                 try:
-                    global_release_date = json_v2_parsed['_embedded']['product']['globalReleaseDate']
+                    # ISO 8601 allows omitting the T delimiter in the extended format
+                    # and sqlite datetime functions use RFC 3339, which omits it by default
+                    global_release_date = json_v2_parsed['_embedded']['product']['globalReleaseDate'].replace('T', ' ')
                 except KeyError:
                     global_release_date = None
                 # process GOG release date
-                gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate']
+                # ISO 8601 allows omitting the T delimiter in the extended format
+                # and sqlite datetime functions use RFC 3339, which omits it by default
+                gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate'].replace('T', ' ')
                 # process tags
                 tags = MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
                 if tags == '': tags = None

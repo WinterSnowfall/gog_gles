@@ -123,7 +123,9 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
                     series = json_parsed['game']['series']['name']
                 except KeyError:
                     series = None
-                first_release_date = json_parsed['game']['first_release_date']
+                # ISO 8601 allows omitting the T delimiter in the extended format
+                # and sqlite datetime functions use RFC 3339, which omits it by default
+                first_release_date = json_parsed['game']['first_release_date'].replace('T', ' ')
                 visible_in_library = json_parsed['game']['visible_in_library']
                 aggregated_rating = json_parsed['game']['aggregated_rating']
 
