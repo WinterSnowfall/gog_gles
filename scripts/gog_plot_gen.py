@@ -126,7 +126,7 @@ def plot_id_timeline(mode, timeline_field, plot_date, db_connection):
         current_product_type = row[2]
         logger.debug(f'current_product_type: {current_product_type}')
         try:
-            current_release_date = datetime.strptime(row[3], '%Y-%m-%dT%H:%M:%S%z').date()
+            current_release_date = datetime.strptime(row[3], '%Y-%m-%d %H:%M:%S%z').date()
         except TypeError:
             current_release_date = None
         logger.debug(f'current_release_date: {current_release_date}')
