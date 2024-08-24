@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.06
-@date: 10/08/2024
+@version: 4.07
+@date: 24/08/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -123,9 +123,11 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
                     series = json_parsed['game']['series']['name']
                 except KeyError:
                     series = None
-                # ISO 8601 allows omitting the T delimiter in the extended format
-                # and sqlite datetime functions use RFC 3339, which omits it by default
-                first_release_date = json_parsed['game']['first_release_date'].replace('T', ' ')
+                first_release_date = json_parsed['game']['first_release_date']
+                if first_release_date is not None:
+                    # ISO 8601 allows omitting the T delimiter in the extended format
+                    # and sqlite datetime functions use RFC 3339, which omits it by default
+                    first_release_date = first_release_date.replace('T', ' ')
                 visible_in_library = json_parsed['game']['visible_in_library']
                 aggregated_rating = json_parsed['game']['aggregated_rating']
 
