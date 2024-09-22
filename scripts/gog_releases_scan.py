@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.07
-@date: 24/08/2024
+@version: 4.20
+@date: 22/09/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -330,6 +330,9 @@ if __name__ == "__main__":
             logger.setLevel(logging.CRITICAL)
 
         scan_mode = general_section.get('scan_mode')
+        # ids that will be skipped, for one reason or another
+        SKIP_IDS = [int(product_id.strip()) for product_id in
+                    general_section.get('skip_ids').split(',') if product_id != '']
         CONF_BACKUP = general_section.get('conf_backup')
         DB_BACKUP = general_section.get('db_backup')
         HTTP_TIMEOUT = general_section.getint('http_timeout')
@@ -424,9 +427,12 @@ if __name__ == "__main__":
 
             while not stop_id_reached and not terminate_event.is_set():
                 try:
-                    id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
-
-                    logger.debug(f'Processing the following product_id: {product_id}.')
+                    if product_id not in SKIP_IDS:
+                        id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
+                        logger.debug(f'Processing the following id: {product_id}.')
+                    else:
+                        logger.warning(f'Skipping the following id: {product_id}.')
+                        
                     product_id += 1
 
                     if product_id > STOP_ID:
@@ -478,32 +484,36 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    logger.debug(f'Now processing id {current_product_id}...')
-                    retries_complete = False
-                    retry_counter = 0
-
-                    while not retries_complete and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                            sleep(RETRY_SLEEP_INTERVAL)
-                            logger.warning(f'Reprocessing id {current_product_id}...')
-
-                        retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
-                                                              session, db_connection)
-
-                        if retries_complete:
+                    
+                    if current_product_id not in SKIP_IDS:
+                        logger.debug(f'Now processing id {current_product_id}...')
+                        retries_complete = False
+                        retry_counter = 0
+    
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-
-                            last_id_counter += 1
-
-                        else:
-                            retry_counter += 1
-                            # terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                fail_event.set()
-                                terminate_event.set()
+                                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                                sleep(RETRY_SLEEP_INTERVAL)
+                                logger.warning(f'Reprocessing id {current_product_id}...')
+    
+                            retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
+                                                                  session, db_connection)
+    
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}.')
+    
+                                last_id_counter += 1
+    
+                            else:
+                                retry_counter += 1
+                                # terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
+                                    terminate_event.set()
+                    else:
+                        logger.warning(f'Skipping the following id: {current_product_id}.')
 
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
                         configParser.read(CONF_FILE_PATH)
@@ -536,29 +546,33 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    logger.debug(f'Now processing id {current_product_id}...')
-                    retries_complete = False
-                    retry_counter = 0
-
-                    while not retries_complete and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
-                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                            sleep(sleep_interval)
-
-                        retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
-                                                              session, db_connection)
-
-                        if retries_complete:
+                    
+                    if current_product_id not in SKIP_IDS:
+                        logger.debug(f'Now processing id {current_product_id}...')
+                        retries_complete = False
+                        retry_counter = 0
+    
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-                        else:
-                            retry_counter += 1
-                            # terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                fail_event.set()
-                                terminate_event.set()
+                                sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
+                                logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                                sleep(sleep_interval)
+    
+                            retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
+                                                                  session, db_connection)
+    
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}.')
+                            else:
+                                retry_counter += 1
+                                # terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
+                                    terminate_event.set()
+                    else:
+                        logger.warning(f'Skipping the following id: {current_product_id}.')
 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -571,17 +585,18 @@ if __name__ == "__main__":
         logger.info('--- Running in MANUAL scan mode ---')
 
         manual_scan_section = configParser['MANUAL_SCAN']
-        id_list = manual_scan_section.get('id_list')
-
-        if id_list == '':
-            logger.warning('Nothing to scan!')
-            raise SystemExit(0)
+        id_list = []
 
         try:
-            id_list = [int(product_id.strip()) for product_id in id_list.split(',')]
+            id_list = [int(product_id.strip()) for product_id in
+                       manual_scan_section.get('id_list').split(',') if product_id != '']
         except ValueError:
             logger.critical('Could not parse id list!')
             raise SystemExit(4)
+        
+        if len(id_list) == 0:
+            logger.warning('Nothing to scan!')
+            raise SystemExit(0)
 
         try:
             with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
@@ -630,29 +645,33 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    logger.debug(f'Now processing id {current_product_id}...')
-                    retries_complete = False
-                    retry_counter = 0
-
-                    while not retries_complete and not terminate_event.is_set():
-                        if retry_counter > 0:
-                            sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
-                            logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
-                            sleep(sleep_interval)
-
-                        retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
-                                                              session, db_connection)
-
-                        if retries_complete:
+                    
+                    if current_product_id not in SKIP_IDS:
+                        logger.debug(f'Now processing id {current_product_id}...')
+                        retries_complete = False
+                        retry_counter = 0
+    
+                        while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-                        else:
-                            retry_counter += 1
-                            # terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                fail_event.set()
-                                terminate_event.set()
+                                sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
+                                logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
+                                sleep(sleep_interval)
+    
+                            retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
+                                                                  session, db_connection)
+    
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}.')
+                            else:
+                                retry_counter += 1
+                                # terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
+                                    terminate_event.set()
+                    else:
+                        logger.warning(f'Skipping the following id: {current_product_id}.')
 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)

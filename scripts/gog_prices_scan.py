@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.06
-@date: 10/08/2024
+@version: 4.20
+@date: 22/09/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -200,10 +200,14 @@ if __name__ == "__main__":
             logger.setLevel(logging.CRITICAL)
 
         scan_mode = general_section.get('scan_mode')
+        # ids that will be skipped, for one reason or another
+        SKIP_IDS = [int(product_id.strip()) for product_id in
+                    general_section.get('skip_ids').split(',') if product_id != '']
         CONF_BACKUP = general_section.get('conf_backup')
         DB_BACKUP = general_section.get('db_backup')
         COUNTRY_CODE = general_section.get('country_code')
-        CURRENCIES_LIST = [currency.strip() for currency in general_section.get('currencies_list').split(',')]
+        CURRENCIES_LIST = [currency.strip() for currency in
+                           general_section.get('currencies_list').split(',') if currency != '']
         HTTP_TIMEOUT = general_section.getint('http_timeout')
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
@@ -272,32 +276,36 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    logger.debug(f'Now processing id {current_product_id}...')
-                    retries_complete = False
-                    retry_counter = 0
-
-                    while not retries_complete and not terminate_signal:
-                        if retry_counter > 0:
-                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
-                            sleep(RETRY_SLEEP_INTERVAL)
-                            logger.warning(f'Reprocessing id {current_product_id}...')
-
-                        retries_complete = gog_prices_query(current_product_id, COUNTRY_CODE, CURRENCIES_LIST,
-                                                            session, db_connection)
-
-                        if retries_complete:
+                    
+                    if current_product_id not in SKIP_IDS:
+                        logger.debug(f'Now processing id {current_product_id}...')
+                        retries_complete = False
+                        retry_counter = 0
+    
+                        while not retries_complete and not terminate_signal:
                             if retry_counter > 0:
-                                logger.info(f'Succesfully retried for {current_product_id}.')
-
-                            last_id_counter += 1
-
-                        else:
-                            retry_counter += 1
-                            # terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                fail_signal = True
-                                terminate_signal = True
+                                logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                                sleep(RETRY_SLEEP_INTERVAL)
+                                logger.warning(f'Reprocessing id {current_product_id}...')
+    
+                            retries_complete = gog_prices_query(current_product_id, COUNTRY_CODE, CURRENCIES_LIST,
+                                                                session, db_connection)
+    
+                            if retries_complete:
+                                if retry_counter > 0:
+                                    logger.info(f'Succesfully retried for {current_product_id}.')
+    
+                                last_id_counter += 1
+    
+                            else:
+                                retry_counter += 1
+                                # terminate the scan if the RETRY_COUNT limit is exceeded
+                                if retry_counter > RETRY_COUNT:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_signal = True
+                                    terminate_signal = True
+                    else:
+                        logger.warning(f'Skipping the following id: {current_product_id}.')
 
                     if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_signal:
                         configParser.read(CONF_FILE_PATH)
