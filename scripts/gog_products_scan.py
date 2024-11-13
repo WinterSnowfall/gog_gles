@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.20
-@date: 22/09/2024
+@version: 4.21
+@date: 14/11/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -275,7 +275,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
 
         # ids corresponding to movies will return a 404 error, others should not
         elif response.status_code == 404:
-            logger.warning(f'{process_tag}2Q >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
+            logger.warning(f'{process_tag}2Q >>> Product with id {product_id} returned an HTTP 404 error code. Skipping.')
 
         else:
             logger.warning(f'{process_tag}2Q >>> HTTP error code {response.status_code} received for {product_id}.')
@@ -456,34 +456,39 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
 
         # unmapped ids will also return a 404 HTTP error code
         elif response.status_code == 404:
-            logger.debug(f'{process_tag}PQ >>> Product with id {product_id} returned a HTTP 404 error code. Skipping.')
+            logger.debug(f'{process_tag}PQ >>> Product with id {product_id} returned an HTTP 404 error code. Skipping.')
+
+        # at times ids may return a 500 HTTP error code (apparently caused by changelog corruption)
+        elif response.status_code == 500:
+            # skip these ids after the usual retry cycle is attempted
+            return (False, response.status_code)
 
         else:
             logger.warning(f'{process_tag}PQ >>> HTTP error code {response.status_code} received for {product_id}.')
             raise Exception()
 
-        return True
+        return (True, response.status_code)
 
     # sometimes the connection may time out
     except requests.Timeout:
         logger.warning(f'{process_tag}PQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
-        return False
+        return (False, None)
 
     # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'{process_tag}PQ >>> Connection SSL error encountered for {product_id}.')
-        return False
+        return (False, None)
 
     # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'{process_tag}PQ >>> Connection error encountered for {product_id}.')
-        return False
+        return (False, None)
 
     except:
         logger.debug(f'{process_tag}PQ >>> Product extended query has failed for {product_id}.')
         # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
-        return False
+        return (False, None)
 
 def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_connection):
 
@@ -529,17 +534,22 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'GQ >>> Reprocessing id {product_id}...')
     
-                        retries_complete = gog_product_extended_query('', product_id, scan_mode, db_lock,
-                                                                      session, db_connection)
+                        retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, db_lock,
+                                                                                   session, db_connection)
     
                         if not retries_complete:
                             retry_counter += 1
                             # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                raise Exception()
+                                # skip the id if the server returns HTTP 500
+                                if http_status == 500:
+                                    logger.warning(f'GQ >>> Skipping id {product_id} due to an HTTP 500 error code.')
+                                    retries_complete = True
+                                else:
+                                    logger.critical('GQ >>> Retry count exceeded, terminating scan!')
+                                    raise Exception()
                 else:
-                    logger.warning(f'Skipping the following id: {product_id}.')
+                    logger.warning(f'GQ >>> Skipping the following id: {product_id}.')
 
         else:
             logger.warning(f'GQ >>> HTTP error code {response.status_code} received.')
@@ -822,14 +832,19 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
                         sleep(RETRY_SLEEP_INTERVAL)
                         logger.warning(f'{process_tag}BQ >>> Reprocessing id {current_product_id}...')
 
-                    retries_complete = gog_product_extended_query(process_tag, current_product_id, scan_mode, db_lock,
-                                                                  session, db_connection)
+                    retries_complete, http_status = gog_product_extended_query(process_tag, current_product_id, scan_mode, db_lock,
+                                                                               session, db_connection)
 
                     if retries_complete:
                         if retry_counter > 1:
                             logger.info(f'{process_tag}BQ >>> Succesfully retried for {current_product_id}.')
                     else:
-                        retry_counter += 1
+                        # skip the id if the server returns HTTP 500
+                        if http_status == 500:
+                            logger.warning(f'BQ >>> Skipping id {current_product_id} due to an HTTP 500 error code.')
+                            retries_complete = True
+                        else:
+                            retry_counter += 1
 
         # this should not be handled as an exception, as it's the default behavior when nothing is detected
         elif response.status_code == HTTP_OK and response.text == '[]':
@@ -1150,8 +1165,8 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
-                                                                          session, db_connection)
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                                                                                       session, db_connection)
     
                             if retries_complete:
                                 if retry_counter > 0:
@@ -1163,9 +1178,14 @@ if __name__ == "__main__":
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
-                                    logger.critical('Retry count exceeded, terminating scan!')
-                                    fail_event.set()
-                                    terminate_event.set()
+                                    # skip the id if the server returns HTTP 500
+                                    if http_status == 500:
+                                        logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
+                                        retries_complete = True
+                                    else:
+                                        logger.critical('Retry count exceeded, terminating scan!')
+                                        fail_event.set()
+                                        terminate_event.set()
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
@@ -1291,8 +1311,8 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
-                                                                          session, db_connection)
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                                                                                       session, db_connection)
     
                             if retries_complete:
                                 if retry_counter > 0:
@@ -1301,9 +1321,14 @@ if __name__ == "__main__":
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
-                                    logger.critical('Retry count exceeded, terminating scan!')
-                                    fail_event.set()
-                                    terminate_event.set()
+                                    # skip the id if the server returns HTTP 500
+                                    if http_status == 500:
+                                        logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
+                                        retries_complete = True
+                                    else:
+                                        logger.critical('Retry count exceeded, terminating scan!')
+                                        fail_event.set()
+                                        terminate_event.set()
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
@@ -1339,8 +1364,8 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
-                                                                          session, db_connection)
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                                                                                       session, db_connection)
     
                             if retries_complete:
                                 if retry_counter > 0:
@@ -1349,9 +1374,14 @@ if __name__ == "__main__":
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
-                                    logger.critical('Retry count exceeded, terminating scan!')
-                                    fail_event.set()
-                                    terminate_event.set()
+                                    # skip the id if the server returns HTTP 500
+                                    if http_status == 500:
+                                        logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
+                                        retries_complete = True
+                                    else:
+                                        logger.critical('Retry count exceeded, terminating scan!')
+                                        fail_event.set()
+                                        terminate_event.set()
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
@@ -1414,8 +1444,8 @@ if __name__ == "__main__":
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {product_id}...')
 
-                        retries_complete = gog_product_extended_query('', product_id, scan_mode, db_lock,
-                                                                      session, db_connection)
+                        retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, db_lock,
+                                                                                   session, db_connection)
 
                         if retries_complete:
                             if retry_counter > 0:
@@ -1424,9 +1454,14 @@ if __name__ == "__main__":
                             retry_counter += 1
                             # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
-                                logger.critical('Retry count exceeded, terminating scan!')
-                                fail_event.set()
-                                terminate_event.set()
+                                # skip the id if the server returns HTTP 500
+                                if http_status == 500:
+                                    logger.warning(f'Skipping id {product_id} due to an HTTP 500 error code.')
+                                    retries_complete = True
+                                else:
+                                    logger.critical('Retry count exceeded, terminating scan!')
+                                    fail_event.set()
+                                    terminate_event.set()
 
                 logger.debug('Running PRAGMA optimize...')
                 db_connection.execute(OPTIMIZE_QUERY)
@@ -1458,8 +1493,8 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
-                                                                          session, db_connection)
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                                                                                       session, db_connection)
     
                             if retries_complete:
                                 if retry_counter > 0:
@@ -1468,9 +1503,14 @@ if __name__ == "__main__":
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
-                                    logger.critical('Retry count exceeded, terminating scan!')
-                                    fail_event.set()
-                                    terminate_event.set()
+                                    # skip the id if the server returns HTTP 500
+                                    if http_status == 500:
+                                        logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
+                                        retries_complete = True
+                                    else:
+                                        logger.critical('Retry count exceeded, terminating scan!')
+                                        fail_event.set()
+                                        terminate_event.set()
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 

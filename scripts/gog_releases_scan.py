@@ -202,7 +202,7 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
 
         # unmapped ids will also return a 404 HTTP error code
         elif response.status_code == 404:
-            logger.debug(f'{process_tag}RQ >>> Release with id {release_id} returned a HTTP 404 error code. Skipping.')
+            logger.debug(f'{process_tag}RQ >>> Release with id {release_id} returned an HTTP 404 error code. Skipping.')
 
         else:
             logger.warning(f'{process_tag}RQ >>> HTTP error code {response.status_code} received for {release_id}.')

@@ -237,7 +237,7 @@ def gog_reviews_query(product_id, session, db_connection):
 
         # some ids will return a 504 error - skip them
         elif response.status_code == 504:
-            logger.warning(f'RVQ >>> Product with id {product_id} returned a HTTP 504 error code. Skipping.')
+            logger.warning(f'RVQ >>> Product with id {product_id} returned an HTTP 504 error code. Skipping.')
 
         else:
             logger.warning(f'RVQ >>> HTTP error code {response.status_code} received for {product_id}.')
