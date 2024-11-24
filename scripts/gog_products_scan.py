@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.21
-@date: 14/11/2024
+@version: 4.22
+@date: 24/11/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -54,13 +54,13 @@ INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
 UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
                    'gp_int_json_payload = ?, '
                    'gp_int_json_diff = ?, '
-                   'gp_title = ?, '
                    'gp_languages = ?, '
                    'gp_changelog = ? WHERE gp_id = ?')
 
 UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_int_v2_json_payload = ?, '
                       'gp_int_v2_json_diff = ?, '
+                      'gp_v2_title = ?, '
                       'gp_v2_product_type = ?, '
                       'gp_v2_developer = ?, '
                       'gp_v2_publisher = ?, '
@@ -167,7 +167,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 else:
                     diff_v2_formatted = None
 
-                # process product title (for loggers)
+                # process product title
                 product_title = json_v2_parsed['_embedded']['product']['title'].strip()
                 # process product type
                 product_type = json_v2_parsed['_embedded']['productType']
@@ -249,22 +249,20 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
 
                 with db_lock:
                     # gp_int_v2_updated, gp_int_v2_json_payload,
-                    # gp_int_v2_previous_json_diff, gp_v2_product_type, gp_v2_developer, gp_v2_publisher,
-                    # gp_v2_size, gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
+                    # gp_int_v2_previous_json_diff, gp_v2_title, gp_v2_product_type, gp_v2_developer,
+                    # gp_v2_publisher, gp_v2_size, gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
-                    # gp_v2_tags, gp_v2_properties, gp_vs_series,
-                    # gp_v2_features, gp_v2_is_using_dosbox,
-                    # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
+                    # gp_v2_tags, gp_v2_properties, gp_vs_series, gp_v2_features,
+                    # gp_v2_is_using_dosbox, gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
                     # gp_v2_description, gp_id (WHERE clause)
                     db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now().isoformat(' '), json_v2_formatted,
-                                                           diff_v2_formatted, product_type, developer, publisher,
-                                                           size, is_preorder, in_development, is_installable,
+                                                           diff_v2_formatted, product_title, product_type, developer,
+                                                           publisher, size, is_preorder, in_development, is_installable,
                                                            os_support_windows, os_support_linux, os_support_osx,
                                                            supported_os_versions, global_release_date, gog_release_date,
-                                                           tags, properties, series,
-                                                           features, is_using_dosbox,
-                                                           links_store, links_support, links_forum,
+                                                           tags, properties, series, features,
+                                                           is_using_dosbox, links_store, links_support, links_forum,
                                                            description, product_id))
                     db_connection.commit()
 
@@ -347,6 +345,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                     changelog = None
 
                 if can_query_v2:
+                    product_title = None
                     product_type = None
                     gog_release_date = None
                     links_store = None
@@ -376,7 +375,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 with db_lock:
                     # gp_int_nr, gp_int_added, gp_int_delisted, gp_int_updated,
                     # gp_int_json_payload, gp_int_json_diff, gp_int_v2_updated, gp_int_v2_json_payload,
-                    # gp_int_v2_json_diff, gp_id, gp_title, gp_v2_product_type, gp_v2_developer, gp_v2_publisher,
+                    # gp_int_v2_json_diff, gp_id, gp_v2_title, gp_v2_product_type, gp_v2_developer, gp_v2_publisher,
                     # gp_v2_size, gp_v2_is_pre_order, gp_v2_in_development, gp_v2_is_installable,
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
@@ -404,8 +403,8 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                     logger.info(f'{process_tag}PQ >>> Found an existing db entry with id {product_id}. Skipping.')
                 # manual scans will be treated as update scans
                 else:
-                    db_cursor.execute('SELECT gp_int_delisted, gp_int_json_payload FROM gog_products WHERE gp_id = ?', (product_id,))
-                    existing_delisted, existing_json_formatted = db_cursor.fetchone()
+                    db_cursor.execute('SELECT gp_int_delisted, gp_int_json_payload, gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
+                    existing_delisted, existing_json_formatted, product_title = db_cursor.fetchone()
 
                     # clear the delisted status if an id is relisted (should only happen rarely)
                     if existing_delisted is not None:
@@ -428,9 +427,9 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
 
                         with db_lock:
                             # gp_int_updated, gp_int_json_payload, gp_int_json_diff,
-                            # gp_title, gp_languages, gp_changelog, gp_id (WHERE clause)
+                            # gp_languages, gp_changelog, gp_id (WHERE clause)
                             db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted, diff_formatted,
-                                                                product_title, languages, changelog, product_id))
+                                                                languages, changelog, product_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
 
@@ -439,7 +438,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
 
         # existing ids return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
-            db_cursor = db_connection.execute('SELECT gp_int_delisted, gp_title FROM gog_products WHERE gp_id = ?', (product_id,))
+            db_cursor = db_connection.execute('SELECT gp_int_delisted, gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
             existing_delisted, product_title = db_cursor.fetchone()
 
             # only alter the entry if not already marked as no longer listed

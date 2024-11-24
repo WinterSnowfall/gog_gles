@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.20
-@date: 22/09/2024
+@version: 4.22
+@date: 24/11/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -140,7 +140,7 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
                         for item in json_parsed['items']:
                             if item['version_name'] != '':
                                 current_branch = item['branch']
-                                current_version_name = item['version_name']
+                                current_version_name = item['version_name'].strip()
                                 # there are no blank string branches as of now, only null ones
                                 if current_branch is not None:
                                     branch_item_list.append(f'{current_version_name} ||| {current_branch}')
@@ -158,7 +158,7 @@ def gog_builds_query(process_tag, product_id, os_value, scan_mode,
 
                     has_private_branches = json_parsed['has_private_branches']
 
-                    db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id,))
+                    db_cursor.execute('SELECT gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
                     result = db_cursor.fetchone()
                     # entries with just hidden builds will not link to any gog_product entry
                     product_name = result[0] if result is not None else None

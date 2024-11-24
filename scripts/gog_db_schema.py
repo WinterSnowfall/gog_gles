@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.20
-@date: 22/09/2024
+@version: 4.22
+@date: 24/11/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -94,7 +94,7 @@ CREATE_GOG_PRODUCTS_QUERY = ('CREATE TABLE gog_products (gp_int_nr INTEGER PRIMA
                              'gp_int_v2_json_payload TEXT, '
                              'gp_int_v2_json_diff TEXT, '
                              'gp_id INTEGER UNIQUE NOT NULL, '
-                             'gp_title TEXT NOT NULL, '
+                             'gp_v2_title TEXT, '
                              'gp_v2_product_type TEXT, '
                              'gp_v2_developer TEXT, '
                              'gp_v2_publisher TEXT, '

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.20
-@date: 22/09/2024
+@version: 4.22
+@date: 24/11/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -161,7 +161,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     elif ratings_retries > 0:
                         logger.info(f'RVQ >>> Successfully retried (verified owner) for {product_id}.')
 
-                db_cursor.execute('SELECT gp_title FROM gog_products WHERE gp_id = ?', (product_id,))
+                db_cursor.execute('SELECT gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
                 result = db_cursor.fetchone()
                 product_title = result[0]
 
