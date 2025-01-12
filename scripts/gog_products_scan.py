@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.22
-@date: 24/11/2024
+@version: 4.24
+@date: 12/01/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -253,7 +253,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                     # gp_v2_publisher, gp_v2_size, gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
                     # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
-                    # gp_v2_tags, gp_v2_properties, gp_vs_series, gp_v2_features,
+                    # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features,
                     # gp_v2_is_using_dosbox, gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
                     # gp_v2_description, gp_id (WHERE clause)
                     db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now().isoformat(' '), json_v2_formatted,
@@ -331,7 +331,9 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
 
                 # process unmodified fields
                 #product_id = json_parsed['id']
-                product_title = json_parsed['title'].strip()
+                # we can get garbage product titles from this endpoint, however in most cases these will be
+                # retrieved and parsed from the v2 metadata anyway; regardless, use this value for logging
+                product_title = product_title_log = json_parsed['title'].strip()
                 # process languages
                 if len(json_parsed['languages']) > 0:
                     languages = MVF_VALUE_SEPARATOR.join([''.join((language_key, ': ', json_parsed['languages'][language_key]))
@@ -392,7 +394,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                                                         links_store, links_support, links_forum,
                                                         description, languages, changelog))
                     db_connection.commit()
-                logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title}.')
+                logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title_log}.')
 
                 if can_query_v2:
                     gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
