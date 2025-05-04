@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.24
-@date: 12/01/2025
+@version: 4.25
+@date: 04/05/2024
 
 Warning: Built for use with python 3.6+
 '''
@@ -54,7 +54,6 @@ INSERT_ID_QUERY = 'INSERT INTO gog_products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
 UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
                    'gp_int_json_payload = ?, '
                    'gp_int_json_diff = ?, '
-                   'gp_languages = ?, '
                    'gp_changelog = ? WHERE gp_id = ?')
 
 UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
@@ -82,7 +81,8 @@ UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_v2_links_store = ?, '
                       'gp_v2_links_support = ?, '
                       'gp_v2_links_forum = ?, '
-                      'gp_v2_description = ? WHERE gp_id = ?')
+                      'gp_v2_description = ?, '
+                      'gp_v2_localizations = ? WHERE gp_id = ?')
 
 INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
@@ -94,6 +94,8 @@ ARCHIVE_NO_OF_RETRIES = 3
 ENDLINE_FIX_REGEX = re.compile(r'([ ]*[\n]){2,}')
 # value separator for multi-valued fields
 MVF_VALUE_SEPARATOR = '; '
+# localization separator for language codes and localization types
+LOCALIZATION_SEPARATOR = ': '
 # supported product OSes, as returned by the v2 API endpoint
 SUPPORTED_OSES = ('windows', 'linux', 'osx')
 # number of seconds a process will wait to get/put in a queue
@@ -246,6 +248,11 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                         description = None
                 except AttributeError:
                     description = None
+                # process localizations
+                localizations = MVF_VALUE_SEPARATOR.join(sorted([LOCALIZATION_SEPARATOR.join((localization['_embedded']['language']['code'],
+                                                                                              localization['_embedded']['localizationScope']['type']))
+                                                                 for localization in json_v2_parsed['_embedded']['localizations']]))
+                if localizations == '': localizations = None
 
                 with db_lock:
                     # gp_int_v2_updated, gp_int_v2_json_payload,
@@ -255,7 +262,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
                     # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features,
                     # gp_v2_is_using_dosbox, gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
-                    # gp_v2_description, gp_id (WHERE clause)
+                    # gp_v2_description, gp_v2_localizations, gp_id (WHERE clause)
                     db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now().isoformat(' '), json_v2_formatted,
                                                            diff_v2_formatted, product_title, product_type, developer,
                                                            publisher, size, is_preorder, in_development, is_installable,
@@ -263,7 +270,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                                                            supported_os_versions, global_release_date, gog_release_date,
                                                            tags, properties, series, features,
                                                            is_using_dosbox, links_store, links_support, links_forum,
-                                                           description, product_id))
+                                                           description, localizations, product_id))
                     db_connection.commit()
 
                 if existing_v2_json_formatted is not None:
@@ -300,11 +307,11 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
 
     # there's no need to query the 'description' for regular ids, since it will be contained in the v2 data
     if can_query_v2:
-        # unused additional expand options: description, expanded_dlcs, screenshots, videos
-        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,related_products,changelog'
+        # unused additional expand options: description, expanded_dlcs, related_products, screenshots, videos
+        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,changelog'
     else:
-        # unused additional expand options: expanded_dlcs, screenshots, videos
-        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,related_products,changelog'
+        # unused additional expand options: expanded_dlcs, related_products, screenshots, videos
+        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,changelog'
 
     try:
         response = session.get(product_url, timeout=HTTP_TIMEOUT)
@@ -334,12 +341,6 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 # we can get garbage product titles from this endpoint, however in most cases these will be
                 # retrieved and parsed from the v2 metadata anyway; regardless, use this value for logging
                 product_title = product_title_log = json_parsed['title'].strip()
-                # process languages
-                if len(json_parsed['languages']) > 0:
-                    languages = MVF_VALUE_SEPARATOR.join([''.join((language_key, ': ', json_parsed['languages'][language_key]))
-                                                          for language_key in json_parsed['languages'].keys()])
-                else:
-                    languages = None
                 # process changelog
                 try:
                     changelog = parse_html_data(json_parsed['changelog'])
@@ -383,7 +384,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                     # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
                     # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features, gp_v2_is_using_dosbox,
                     # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
-                    # gp_v2_description, gp_languages, gp_changelog
+                    # gp_v2_description, gp_v2_localizations, gp_changelog
                     db_cursor.execute(INSERT_ID_QUERY, (None, datetime.now().isoformat(' '), None, None,
                                                         json_formatted, None, None, None,
                                                         None, product_id, product_title, product_type, None, None,
@@ -392,7 +393,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                                                         None, None, gog_release_date,
                                                         None, None, None, None, False,
                                                         links_store, links_support, links_forum,
-                                                        description, languages, changelog))
+                                                        description, None, changelog))
                     db_connection.commit()
                 logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title_log}.')
 
@@ -428,10 +429,10 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                             diff_formatted = None
 
                         with db_lock:
-                            # gp_int_updated, gp_int_json_payload, gp_int_json_diff,
-                            # gp_languages, gp_changelog, gp_id (WHERE clause)
-                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted, diff_formatted,
-                                                                languages, changelog, product_id))
+                            # gp_int_updated, gp_int_json_payload,
+                            # gp_int_json_diff, gp_changelog, gp_id (WHERE clause)
+                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted,
+                                                                diff_formatted, changelog, product_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
 
