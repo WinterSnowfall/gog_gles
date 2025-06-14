@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.25
-@date: 04/05/2024
+@version: 5.00
+@date: 14/06/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -21,6 +21,15 @@ from lxml import html as lhtml
 from logging.handlers import RotatingFileHandler
 # uncomment for debugging purposes only
 #import traceback
+
+from common.gog_constants_interface import ConstantsInterface
+
+# attempt to import an HTTPS proxy interface implementation
+try:
+    from common.gog_proxy_interface import ProxyInterface
+    PROXY_INTERFACE_IS_IMPORTED = True
+except ImportError:
+    PROXY_INTERFACE_IS_IMPORTED = False
 
 # conf file block
 CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_forums_scan.conf')
@@ -43,10 +52,6 @@ DB_FILE_PATH = os.path.join('..', 'output_db', 'gog_gles.db')
 # CONSTANTS
 INSERT_FORUM_QUERY = 'INSERT INTO gog_forums VALUES (?,?,?,?,?)'
 
-OPTIMIZE_QUERY = 'PRAGMA optimize'
-
-HTTP_OK = 200
-
 def sigterm_handler(signum, frame):
     logger.debug('Stopping scan due to SIGTERM...')
 
@@ -57,18 +62,26 @@ def sigint_handler(signum, frame):
 
     raise SystemExit(0)
 
-def gog_forums_query(session, db_connection):
+def gog_forums_query(https_proxy, session, db_connection):
 
     forums_url = 'https://www.gog.com/forum/ajax?a=getArrayList&s=Find%20specific%20forum...&showAll=1'
 
     detected_forum_names = []
 
     try:
-        response = session.get(forums_url, timeout=HTTP_TIMEOUT)
+        # use a HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(forums_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+            # NOTE: The HTTPS proxy will not automatically refresh the IP if the connection is throttled,
+            # however its use will allow the script to run during a temporary IP ban
+        else:
+            response = session.get(forums_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'FRQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             html_tree = lhtml.fromstring(response.text)
 
             parent_divs = html_tree.xpath('//div[contains(@class, "name")]/a[contains(@href, "")]')
@@ -192,6 +205,16 @@ if __name__ == "__main__":
         HTTP_TIMEOUT = general_section.getint('http_timeout')
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
+
+        # parsing proxy parameters
+        proxy_section = configParser['PROXY']
+        HTTPS_PROXY = PROXY_INTERFACE_IS_IMPORTED and proxy_section.getboolean('https_proxy')
+        PROXY_START = proxy_section.getboolean('proxy_start')
+        # these paths can be relative to the user's home folder
+        PROXY_BINARY_PATH = os.path.expanduser(proxy_section.get('proxy_binary_path'))
+        PROXY_CONF_PATH = os.path.expanduser(proxy_section.get('proxy_conf_path'))
+        # parsing constants
+        PROXY_STARTUP_DELAY = proxy_section.getint('proxy_startup_delay')
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
@@ -209,6 +232,22 @@ if __name__ == "__main__":
             logger.critical('Could find specified DB file!')
             raise SystemExit(2)
 
+    # for HTTPS proxy use
+    if HTTPS_PROXY:
+        logger.warning('+++ HTTPS proxy mode enabled +++')
+
+        # set up the proxy interface
+        ProxyInterface.logger = logger
+        ProxyInterface.proxy_binary_path = PROXY_BINARY_PATH
+        ProxyInterface.proxy_conf_path = PROXY_CONF_PATH
+        ProxyInterface.proxy_startup_delay = PROXY_STARTUP_DELAY
+
+        if PROXY_START:
+            logger.info('Starting HTTPS proxy process...')
+            # optionally also stop any existing proxy instances
+            #ProxyInterface.stop_proxy_process()
+            ProxyInterface.start_proxy_process()
+
     terminate_signal = False
     fail_signal = False
 
@@ -225,7 +264,7 @@ if __name__ == "__main__":
                     sleep(RETRY_SLEEP_INTERVAL)
                     logger.warning(f'Reprocessing forum entries...')
 
-                retries_complete = gog_forums_query(session, db_connection)
+                retries_complete = gog_forums_query(HTTPS_PROXY, session, db_connection)
 
                 if retries_complete:
                     if retry_counter > 0:
@@ -239,12 +278,14 @@ if __name__ == "__main__":
                         fail_signal = True
                         terminate_signal = True
 
-            logger.debug('Running PRAGMA optimize...')
-            db_connection.execute(OPTIMIZE_QUERY)
+            db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
     except SystemExit:
         terminate_signal = True
         logger.info('Stopping forums scan...')
+
+    if HTTPS_PROXY and PROXY_START:
+        ProxyInterface.stop_proxy_process()
 
     logger.info('All done! Exiting...')
 

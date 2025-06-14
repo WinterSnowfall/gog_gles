@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.25
-@date: 04/05/2024
+@version: 5.00
+@date: 14/06/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -26,6 +26,15 @@ from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
 # uncomment for debugging purposes only
 #import traceback
+
+from common.gog_constants_interface import ConstantsInterface
+
+# attempt to import an HTTPS proxy interface implementation
+try:
+    from common.gog_proxy_interface import ProxyInterface
+    PROXY_INTERFACE_IS_IMPORTED = True
+except ImportError:
+    PROXY_INTERFACE_IS_IMPORTED = False
 
 # conf file block
 CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_releases_scan.conf')
@@ -59,17 +68,6 @@ UPDATE_ID_QUERY = ('UPDATE gog_releases SET gr_int_updated = ?, '
                    'gr_visible_in_library = ?, '
                    'gr_aggregated_rating = ? WHERE gr_external_id = ?')
 
-OPTIMIZE_QUERY = 'PRAGMA optimize'
-
-# value separator for multi-valued fields
-MVF_VALUE_SEPARATOR = '; '
-# number of seconds a process will wait to get/put in a queue
-QUEUE_WAIT_TIMEOUT = 10 #seconds
-# allow a process to fully load before starting the next process
-# (helps preserve process start order for logging purposes)
-PROCESS_START_WAIT_INTERVAL = 0.05 #seconds
-HTTP_OK = 200
-
 def sigterm_handler(signum, frame):
     # exceptions may happen here as well due to logger syncronization mayhem on shutdown
     try:
@@ -88,16 +86,22 @@ def sigint_handler(signum, frame):
 
     raise SystemExit(0)
 
-def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_connection):
+def gog_releases_query(process_tag, release_id, scan_mode, https_proxy, db_lock, session, db_connection):
 
     releases_url = f'https://gamesdb.gog.com/platforms/gog/external_releases/{release_id}'
 
     try:
-        response = session.get(releases_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(releases_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+        else:
+            response = session.get(releases_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'{process_tag}RQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             if scan_mode == 'full':
                 logger.info(f'{process_tag}RQ >>> Releases query for id {release_id} has returned a valid response...')
 
@@ -113,10 +117,10 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
                 release_title = json_parsed['title']['*'].strip()
                 release_type = json_parsed['type']
                 # process supported oses
-                supported_oses = MVF_VALUE_SEPARATOR.join(sorted([os['slug'] for os in json_parsed['supported_operating_systems']]))
+                supported_oses = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([os['slug'] for os in json_parsed['supported_operating_systems']]))
                 if supported_oses == '': supported_oses = None
                 # process genres
-                genres = MVF_VALUE_SEPARATOR.join(sorted([genre['name']['*'] for genre in json_parsed['game']['genres']]))
+                genres = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([genre['name']['*'] for genre in json_parsed['game']['genres']]))
                 if genres == '': genres = None
                 # process unmodified fields
                 try:
@@ -210,6 +214,11 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
 
         return True
 
+    # atempt a proxy restart in case of a timeout by raising an exception to the workload_dispatcher
+    except requests.Timeout:
+        logger.warning(f'{process_tag}RQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {release_id}.')
+        raise Exception()
+
     # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'{process_tag}RQ >>> Connection SSL error encountered for {release_id}.')
@@ -225,10 +234,15 @@ def gog_releases_query(process_tag, release_id, scan_mode, db_lock, session, db_
         # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
 
+        # raise exception to the workload_dispatcher in case the proxy server needs to be restarted
+        if (scan_mode == 'full' and response.status_code is not None and
+            response.status_code in ConstantsInterface.PROXY_RESTART_HTTP_CODES):
+            raise Exception()
+
         return False
 
 def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
-                   fail_event, terminate_event):
+                   proxy_lock, https_proxy, proxy_event, fail_event, terminate_event):
     # catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
     # catch SIGINT and exit gracefully
@@ -241,30 +255,108 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
 
         try:
             while not terminate_event.is_set():
-                product_id = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
+                product_id = id_queue.get(True, ConstantsInterface.QUEUE_WAIT_TIMEOUT)
 
                 retry_counter = 0
+                proxy_retry_counter = 0
                 retries_complete = False
+                proxy_restart = False
 
                 while not retries_complete and not terminate_event.is_set():
                     if retry_counter > 0:
                         logger.debug(f'{process_tag}>>> Retry count: {retry_counter}.')
-                        # main iteration incremental sleep
-                        sleep((INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
 
-                    retries_complete = gog_releases_query(process_tag, product_id, scan_mode, db_lock,
-                                                          processSession, process_db_connection)
+                        if https_proxy:
+                            if not proxy_event.is_set():
+                                # reset HTTP session
+                                processSession = requests.Session()
+                                logger.debug(f'{process_tag}>>> Waiting for HTTPS proxy event...')
+                            else:
+                                # non-incremental sleep, in case of unexpected HTTP errors
+                                # (such as 500) that will not trigger a proxy restart
+                                sleep(RETRY_SLEEP_INTERVAL)
 
-                    if retries_complete:
-                        if retry_counter > 0:
-                            logger.info(f'{process_tag}>>> Succesfully retried for {product_id}.')
+                            proxy_event.wait()
+
+                        else:
+                            # main iteration incremental sleep
+                            sleep((INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
+
+                    # skip any processing on wakeup of unsuccessful proxy restarts
+                    if not terminate_event.is_set():
+                        try:
+                            retries_complete = gog_releases_query(process_tag, product_id, scan_mode, https_proxy, db_lock,
+                                                                  processSession, process_db_connection)
+                        # exceptions should only be raised to trigger proxy restarts
+                        except:
+                            if https_proxy:
+                                # determine event state in a lock to avoid multiple processes performing proxy restarts
+                                with proxy_lock:
+                                    if proxy_event.is_set():
+                                        proxy_event.clear()
+                                        proxy_restart = True
+
+                                if proxy_restart:
+                                    while not retries_complete and not terminate_event.is_set():
+                                        proxy_retry_counter += 1
+
+                                        if proxy_retry_counter > RETRY_COUNT:
+                                            logger.warning(f'{process_tag}>>> HTTPS proxy IP refresh unsuccessful.')
+                                            fail_event.set()
+                                            terminate_event.set()
+                                            # allow other worker threads to terminate instead of waiting
+                                            proxy_event.set()
+
+                                        else:
+                                            logger.debug(f'{process_tag}>>> HTTPS proxy retry count: {proxy_retry_counter}.')
+                                            # proxy iteration incremental sleep
+                                            sleep((INCREMENTAL_RETRY_BASE ** (proxy_retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
+
+                                            logger.warning(f'{process_tag}>>> HTTPS proxy trigger received. '
+                                                           f'Refreshing HTTPS proxy IP ({proxy_retry_counter})...')
+                                            ProxyInterface.get_new_proxy_ip()
+                                            logger.info(f'{process_tag}>>> HTTPS proxy IP refresh complete.')
+
+                                            try:
+                                                # reset HTTP session
+                                                processSession = requests.Session()
+                                                retries_complete = gog_releases_query(process_tag, product_id, scan_mode, https_proxy, db_lock,
+                                                                                      processSession, process_db_connection)
+                                            except:
+                                                retries_complete = False
+
+                            else:
+                                logger.critical(f'{process_tag}>>> HTTP exception received. Stopping script!')
+                                fail_event.set()
+                                terminate_event.set()
+
+                        if retries_complete:
+                            # should only worry about proxy_restart in case the proxy_iteration_counter is not 0
+                            if proxy_retry_counter > 0:
+                                logger.info(f'{process_tag}>>> Succesfully retried for {product_id}.')
+
+                                # reset the proxy_event if a query is successful
+                                if not proxy_event.is_set():
+                                    # mark the proxy_event as no longer pending
+                                    proxy_event.set()
+                                    logger.debug(f'{process_tag}>>> HTTPS proxy retry released.')
+
+                            elif retry_counter > 0:
+                                logger.info(f'{process_tag}>>> Succesfully retried for {product_id}.')
+
+                        else:
+                            retry_counter += 1
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
+                                fail_event.set()
+                                terminate_event.set()
+                                if https_proxy:
+                                    # mark the proxy_event as no longer pending
+                                    proxy_event.set()
+
                     else:
-                        retry_counter += 1
-                        # terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
-                            fail_event.set()
-                            terminate_event.set()
+                        logger.info(f'{process_tag}>>> Terminating after unsuccessful HTTPS proxy IP refresh...')
 
                 if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
@@ -285,9 +377,8 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
 
         logger.info(f'{process_tag}>>> Stopping worker process...')
 
-        logger.debug(f'{process_tag}>>> Running PRAGMA optimize...')
         with db_lock:
-            process_db_connection.execute(OPTIMIZE_QUERY)
+            process_db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
 if __name__ == "__main__":
     # catch SIGTERM and exit gracefully
@@ -339,6 +430,16 @@ if __name__ == "__main__":
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
         INCREMENTAL_RETRY_BASE = general_section.getint('incremental_retry_base')
+
+        # parsing proxy parameters
+        proxy_section = configParser['PROXY']
+        HTTPS_PROXY = PROXY_INTERFACE_IS_IMPORTED and proxy_section.getboolean('https_proxy')
+        START_PROXY = proxy_section.getboolean('start_proxy')
+        # these paths can be relative to the user's home folder
+        PROXY_BINARY_PATH = os.path.expanduser(proxy_section.get('proxy_binary_path'))
+        PROXY_CONF_PATH = os.path.expanduser(proxy_section.get('proxy_conf_path'))
+        # parsing constants
+        PROXY_STARTUP_DELAY = proxy_section.getint('proxy_startup_delay')
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
@@ -377,14 +478,32 @@ if __name__ == "__main__":
             copy2(DB_FILE_PATH, DB_FILE_PATH + '.bak')
             logger.info('Successfully created db backup.')
         else:
-            #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
             raise SystemExit(3)
+
+    # for HTTPS proxy use
+    if HTTPS_PROXY:
+        logger.warning('+++ HTTPS proxy mode enabled +++')
+
+        # set up the proxy interface
+        ProxyInterface.logger = logger
+        ProxyInterface.proxy_binary_path = PROXY_BINARY_PATH
+        ProxyInterface.proxy_conf_path = PROXY_CONF_PATH
+        ProxyInterface.proxy_startup_delay = PROXY_STARTUP_DELAY
+
+        if START_PROXY:
+            logger.info('Starting HTTPS proxy process...')
+            # optionally also stop any existing proxy instances
+            #ProxyInterface.stop_proxy_process()
+            ProxyInterface.start_proxy_process()
 
     # inter-process resources locks
     db_lock = multiprocessing.Lock()
     config_lock = multiprocessing.Lock()
+    proxy_lock = multiprocessing.Lock()
     # shared process events
+    proxy_event = multiprocessing.Event()
+    proxy_event.set()
     terminate_event = multiprocessing.Event()
     terminate_event.clear()
     fail_event = multiprocessing.Event()
@@ -419,16 +538,16 @@ if __name__ == "__main__":
 
                 process = multiprocessing.Process(target=worker_process,
                                                   args=(process_tag_nice, scan_mode, id_queue, db_lock, config_lock,
-                                                        fail_event, terminate_event),
+                                                        proxy_lock, HTTPS_PROXY, proxy_event, fail_event, terminate_event),
                                                   daemon=True)
                 process.start()
                 process_list.append(process)
-                sleep(PROCESS_START_WAIT_INTERVAL)
+                sleep(ConstantsInterface.PROCESS_START_WAIT_INTERVAL)
 
             while not stop_id_reached and not terminate_event.is_set():
                 try:
                     if product_id not in SKIP_IDS:
-                        id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
+                        id_queue.put(product_id, True, ConstantsInterface.QUEUE_WAIT_TIMEOUT)
                         logger.debug(f'Processing the following id: {product_id}.')
                     else:
                         logger.warning(f'Skipping the following id: {product_id}.')
@@ -496,7 +615,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete = gog_releases_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                   session, db_connection)
     
                             if retries_complete:
@@ -524,8 +643,7 @@ if __name__ == "__main__":
 
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -558,7 +676,7 @@ if __name__ == "__main__":
                                 logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                                 sleep(sleep_interval)
     
-                            retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete = gog_releases_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                   session, db_connection)
     
                             if retries_complete:
@@ -574,8 +692,7 @@ if __name__ == "__main__":
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -611,7 +728,7 @@ if __name__ == "__main__":
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {product_id}...')
 
-                        retries_complete = gog_releases_query('', product_id, scan_mode, db_lock,
+                        retries_complete = gog_releases_query('', product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                               session, db_connection)
 
                         if retries_complete:
@@ -625,8 +742,7 @@ if __name__ == "__main__":
                                 fail_event.set()
                                 terminate_event.set()
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -657,7 +773,7 @@ if __name__ == "__main__":
                                 logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                                 sleep(sleep_interval)
     
-                            retries_complete = gog_releases_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete = gog_releases_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                   session, db_connection)
     
                             if retries_complete:
@@ -673,12 +789,14 @@ if __name__ == "__main__":
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
             logger.info('Stopping removed scan...')
+
+    if HTTPS_PROXY and START_PROXY:
+        ProxyInterface.stop_proxy_process()
 
     if not terminate_event.is_set() and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')

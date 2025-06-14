@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.25
-@date: 04/05/2024
+@version: 5.00
+@date: 14/06/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -24,6 +24,15 @@ from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
 # uncomment for debugging purposes only
 #import traceback
+
+from common.gog_constants_interface import ConstantsInterface
+
+# attempt to import an HTTPS proxy interface implementation
+try:
+    from common.gog_proxy_interface import ProxyInterface
+    PROXY_INTERFACE_IS_IMPORTED = True
+except ImportError:
+    PROXY_INTERFACE_IS_IMPORTED = False
 
 # conf file block
 CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_ratings_scan.conf')
@@ -56,10 +65,6 @@ UPDATE_RATING_QUERY = ('UPDATE gog_ratings SET grt_int_updated = ?, '
                        'grt_avg_rating_verified_owner_count = ?, '
                        'grt_is_reviewable = ? WHERE grt_int_id = ?')
 
-OPTIMIZE_QUERY = 'PRAGMA optimize'
-
-HTTP_OK = 200
-
 def sigterm_handler(signum, frame):
     logger.debug('Stopping scan due to SIGTERM...')
 
@@ -70,7 +75,7 @@ def sigint_handler(signum, frame):
 
     raise SystemExit(0)
 
-def gog_ratings_query(product_id, is_verified, session):
+def gog_ratings_query(product_id, is_verified, https_proxy, session):
 
     ratings_url = f'https://reviews.gog.com/v1/products/{product_id}/averageRating'
 
@@ -80,11 +85,19 @@ def gog_ratings_query(product_id, is_verified, session):
     logger.debug(f'RTQ >>> Querying url: {ratings_url}.')
 
     try:
-        response = session.get(ratings_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(ratings_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+            # NOTE: The HTTPS proxy will not automatically refresh the IP if the connection is throttled,
+            # however its use will allow the script to run during a temporary IP ban
+        else:
+            response = session.get(ratings_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'RTQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
 
             value = json_parsed['value']
@@ -109,17 +122,25 @@ def gog_ratings_query(product_id, is_verified, session):
 
         return (None, None, False)
 
-def gog_reviews_query(product_id, session, db_connection):
+def gog_reviews_query(product_id, https_proxy, session, db_connection):
     # limit the query to only one result in the english language,
     # which will return the most helpful review (because of desc:votes)
     reviews_url = f'https://reviews.gog.com/v1/products/{product_id}/reviews?language=in:en-US&limit=1&order=desc:votes'
 
     try:
-        response = session.get(reviews_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(reviews_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+            # NOTE: The HTTPS proxy will not automatically refresh the IP if the connection is throttled,
+            # however its use will allow the script to run during a temporary IP ban
+        else:
+            response = session.get(reviews_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'RVQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
 
             pages = json_parsed['pages']
@@ -143,7 +164,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     if ratings_retries > 0:
                         logger.warning(f'RVQ >>> Ratings retry number {ratings_retries}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                         sleep(RETRY_SLEEP_INTERVAL)
-                    avg_rating, avg_rating_count, ratings_found = gog_ratings_query(product_id, False, session)
+                    avg_rating, avg_rating_count, ratings_found = gog_ratings_query(product_id, False, https_proxy, session)
                     if not ratings_found:
                         ratings_retries += 1
                     elif ratings_retries > 0:
@@ -155,7 +176,7 @@ def gog_reviews_query(product_id, session, db_connection):
                     if ratings_retries > 0:
                         logger.warning(f'RVQ >>> Ratings (verified owner) retry number {ratings_retries}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                         sleep(RETRY_SLEEP_INTERVAL)
-                    avg_rating_verified_owner, avg_rating_verified_owner_count, ratings_found = gog_ratings_query(product_id, True, session)
+                    avg_rating_verified_owner, avg_rating_verified_owner_count, ratings_found = gog_ratings_query(product_id, True, https_proxy, session)
                     if not ratings_found:
                         ratings_retries += 1
                     elif ratings_retries > 0:
@@ -309,6 +330,15 @@ if __name__ == "__main__":
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
 
+        # parsing proxy parameters
+        proxy_section = configParser['PROXY']
+        HTTPS_PROXY = PROXY_INTERFACE_IS_IMPORTED and proxy_section.getboolean('https_proxy')
+        START_PROXY = proxy_section.getboolean('start_proxy')
+        # these paths can be relative to the user's home folder
+        PROXY_BINARY_PATH = os.path.expanduser(proxy_section.get('proxy_binary_path'))
+        PROXY_CONF_PATH = os.path.expanduser(proxy_section.get('proxy_conf_path'))
+        # parsing constants
+        PROXY_STARTUP_DELAY = proxy_section.getint('proxy_startup_delay')
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
@@ -344,6 +374,22 @@ if __name__ == "__main__":
             #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
             raise SystemExit(3)
+
+    # for HTTPS proxy use
+    if HTTPS_PROXY:
+        logger.warning('+++ HTTPS proxy mode enabled +++')
+
+        # set up the proxy interface
+        ProxyInterface.logger = logger
+        ProxyInterface.proxy_binary_path = PROXY_BINARY_PATH
+        ProxyInterface.proxy_conf_path = PROXY_CONF_PATH
+        ProxyInterface.proxy_startup_delay = PROXY_STARTUP_DELAY
+
+        if START_PROXY:
+            logger.info('Starting HTTPS proxy process...')
+            # optionally also stop any existing proxy instances
+            #ProxyInterface.stop_proxy_process()
+            ProxyInterface.start_proxy_process()
 
     terminate_signal = False
     fail_signal = False
@@ -386,7 +432,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_reviews_query(current_product_id,
+                            retries_complete = gog_reviews_query(current_product_id, HTTPS_PROXY,
                                                                  session, db_connection)
     
                             if retries_complete:
@@ -414,8 +460,7 @@ if __name__ == "__main__":
 
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_signal = True
@@ -444,7 +489,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete = gog_reviews_query(current_product_id,
+                            retries_complete = gog_reviews_query(current_product_id, HTTPS_PROXY,
                                                                  session, db_connection)
     
                             if retries_complete:
@@ -461,12 +506,14 @@ if __name__ == "__main__":
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_signal = True
             logger.info('Stopping removed scan...')
+
+    if HTTPS_PROXY and START_PROXY:
+        ProxyInterface.stop_proxy_process()
 
     if not terminate_signal and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')

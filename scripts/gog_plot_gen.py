@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.25
-@date: 04/05/2024
+@version: 5.00
+@date: 14/06/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -13,6 +13,7 @@ import signal
 import argparse
 import os
 from sys import argv
+from configparser import ConfigParser
 from datetime import datetime
 from datetime import timedelta
 from matplotlib import pyplot
@@ -21,6 +22,11 @@ from matplotlib import gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.ticker import AutoMinorLocator
 from matplotlib.ticker import ScalarFormatter
+
+from common.gog_constants_interface import ConstantsInterface
+
+# conf file block
+CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_plot_gen.conf')
 
 # logging configuration block
 LOGGER_FORMAT = '%(asctime)s %(levelname)s >>> %(message)s'
@@ -33,16 +39,11 @@ logger.setLevel(logging.INFO) # DEBUG, INFO, WARNING, ERROR, CRITICAL
 # db configuration block
 DB_FILE_PATH = os.path.join('..', 'output_db', 'gog_gles.db')
 
-# CONSTANTS
-OPTIMIZE_QUERY = 'PRAGMA optimize'
-
 PNG_WIDTH_INCHES = 21.60
 PNG_HEIGHT_INCHES = 10.80
 ID_INTERVAL_LENGTH = 10000000
 MAX_ID = 2147483647
 CUTOFF_ID = 10
-# set this date to match your initial products_scan run
-CUTOFF_DATE = '1970-01-01'
 
 DEFAULT_CHART_COLORS = ('tab:orange', 'tab:blue', 'tab:green')
 SUNSET_CHART_COLORS = ('purple', 'slateblue', 'goldenrod')
@@ -295,6 +296,34 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    configParser = ConfigParser()
+
+    try:
+        configParser.read(CONF_FILE_PATH)
+
+        # parsing generic parameters
+        general_section = configParser['GENERAL']
+        LOGGING_LEVEL = general_section.get('logging_level').upper()
+
+        # DEBUG, INFO, WARNING, ERROR, CRITICAL
+        # remains set to INFO if none of the other valid log levels are specified
+        if LOGGING_LEVEL == 'INFO':
+            pass
+        elif LOGGING_LEVEL == 'DEBUG':
+            logger.setLevel(logging.DEBUG)
+        elif LOGGING_LEVEL == 'WARNING':
+            logger.setLevel(logging.WARNING)
+        elif LOGGING_LEVEL == 'ERROR':
+            logger.setLevel(logging.ERROR)
+        elif LOGGING_LEVEL == 'CRITICAL':
+            logger.setLevel(logging.CRITICAL)
+
+        # parsing constants
+        CUTOFF_DATE = general_section.get('cutoff_date')
+    except:
+        logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
+        raise SystemExit(1)
+
     logger.info('*** Running PLOT GENERATION script ***')
 
     CHART_COLORS = DEFAULT_CHART_COLORS
@@ -333,8 +362,7 @@ if __name__ == "__main__":
             with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 plot_id_timeline(plot_mode, timeline_field, date_now, db_connection)
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             logger.info('Stopping timeline generation...')
@@ -346,8 +374,7 @@ if __name__ == "__main__":
             with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 plot_id_distribution(plot_mode, date_now, db_connection)
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             logger.info('Stopping distribution generation...')
@@ -359,8 +386,7 @@ if __name__ == "__main__":
             with sqlite3.connect(DB_FILE_PATH) as db_connection:
                 plot_id_distribution(plot_mode, date_now, db_connection)
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             logger.info('Stopping incremental generation...')
