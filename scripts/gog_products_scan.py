@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 4.25
-@date: 04/05/2024
+@version: 5.00
+@date: 14/06/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -28,6 +28,15 @@ from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
 # uncomment for debugging purposes only
 #import traceback
+
+from common.gog_constants_interface import ConstantsInterface
+
+# attempt to import an HTTPS proxy interface implementation
+try:
+    from common.gog_proxy_interface import ProxyInterface
+    PROXY_INTERFACE_IS_IMPORTED = True
+except ImportError:
+    PROXY_INTERFACE_IS_IMPORTED = False
 
 # conf file block
 CONF_FILE_PATH = os.path.join('..', 'conf', 'gog_products_scan.conf')
@@ -86,24 +95,14 @@ UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
 
 INSERT_FILES_QUERY = 'INSERT INTO gog_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
 
-OPTIMIZE_QUERY = 'PRAGMA optimize'
-
 # number of retries after which an id is considered parmenently delisted (for archive mode)
 ARCHIVE_NO_OF_RETRIES = 3
 # static regex pattern for endline fixing of extra description/changelog whitespace
 ENDLINE_FIX_REGEX = re.compile(r'([ ]*[\n]){2,}')
-# value separator for multi-valued fields
-MVF_VALUE_SEPARATOR = '; '
 # localization separator for language codes and localization types
 LOCALIZATION_SEPARATOR = ': '
 # supported product OSes, as returned by the v2 API endpoint
 SUPPORTED_OSES = ('windows', 'linux', 'osx')
-# number of seconds a process will wait to get/put in a queue
-QUEUE_WAIT_TIMEOUT = 10 #seconds
-# allow a process to fully load before starting the next process
-# (helps preserve process start order for logging purposes)
-PROCESS_START_WAIT_INTERVAL = 0.05 #seconds
-HTTP_OK = 200
 # non-standard unicode values (either encoded or not) which need to be purged from the JSON API output;
 # the state of being encoded or not encoded in the original text output seems to depend on some form
 # of unicode string black magic that I can't quite understand...
@@ -134,16 +133,24 @@ def parse_html_data(html_content):
 
     return html_content_parsed
 
-def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection):
+def gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session, db_connection):
 
     product_url = f'https://api.gog.com/v2/games/{product_id}?locale=en-US'
 
     try:
-        response = session.get(product_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(product_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+            # NOTE: The HTTPS proxy will not automatically refresh the IP if the connection is throttled,
+            # however its use will allow the script to run during a temporary IP ban
+        else:
+            response = session.get(product_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'{process_tag}2Q >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             logger.debug(f'{process_tag}2Q >>> Product v2 query for id {product_id} has returned a valid response...')
 
             # ignore unicode control characters which can be part of game descriptions and/or changelogs;
@@ -197,9 +204,9 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                     elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[2]:
                         os_support_osx = True
                 # process supported os versions
-                supported_os_versions = MVF_VALUE_SEPARATOR.join(os_value['operatingSystem']['versions'] for os_value in supported_oses
-                                                                 #some ids have empty versions strings for certain oses...
-                                                                 if os_value['operatingSystem']['versions'] != '')
+                supported_os_versions = ConstantsInterface.MVF_VALUE_SEPARATOR.join(os_value['operatingSystem']['versions'] for os_value in supported_oses
+                                                                                    #some ids have empty versions strings for certain oses...
+                                                                                    if os_value['operatingSystem']['versions'] != '')
                 # process global release date
                 try:
                     global_release_date = json_v2_parsed['_embedded']['product']['globalReleaseDate']
@@ -216,13 +223,13 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                     # and sqlite datetime functions use RFC 3339, which omits it by default
                     gog_release_date = gog_release_date.replace('T', ' ')
                 # process tags
-                tags = MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
+                tags = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
                 if tags == '': tags = None
                 # process properties (tee is used for avoiding a reserved name) - the field may be absent and return a KeyError
                 try:
                     # ideally should not need a strip, but there are a few entries with extra whitespace here and there
-                    properties = MVF_VALUE_SEPARATOR.join(sorted([propertee['name'].strip() for propertee in
-                                                                  json_v2_parsed['_embedded']['properties']]))
+                    properties = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([propertee['name'].strip() for propertee in
+                                                                             json_v2_parsed['_embedded']['properties']]))
                     if properties == '': properties = None
                 except KeyError:
                     properties = None
@@ -232,7 +239,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 except TypeError:
                     series = None
                 # process features
-                features = MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
+                features = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
                 if features == '': features = None
                 # process is_using_dosbox
                 is_using_dosbox = json_v2_parsed['isUsingDosBox']
@@ -249,9 +256,9 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
                 except AttributeError:
                     description = None
                 # process localizations
-                localizations = MVF_VALUE_SEPARATOR.join(sorted([LOCALIZATION_SEPARATOR.join((localization['_embedded']['language']['code'],
-                                                                                              localization['_embedded']['localizationScope']['type']))
-                                                                 for localization in json_v2_parsed['_embedded']['localizations']]))
+                localizations = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([LOCALIZATION_SEPARATOR.join((localization['_embedded']['language']['code'],
+                                                                                                                 localization['_embedded']['localizationScope']['type']))
+                                                                                    for localization in json_v2_parsed['_embedded']['localizations']]))
                 if localizations == '': localizations = None
 
                 with db_lock:
@@ -297,7 +304,7 @@ def gog_product_v2_query(process_tag, product_id, db_lock, session, db_connectio
         #logger.error(traceback.format_exc())
         raise
 
-def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, session, db_connection):
+def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, db_lock, session, db_connection):
     # determine if a certain product id can query the v2 endpoint (movies and certain
     # other ids will not get a valid v2 response, so querying it is useless)
     if product_id in MOVIES_ID_LIST or product_id in NO_V2_ENDPOINT:
@@ -314,11 +321,19 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
         product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,changelog'
 
     try:
-        response = session.get(product_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(product_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+            # NOTE: The HTTPS proxy will not automatically refresh the IP if the connection is throttled,
+            # however its use will allow the script to run during a temporary IP ban
+        else:
+            response = session.get(product_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'{process_tag}PQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             if scan_mode == 'full' or scan_mode == 'builds':
                 logger.info(f'{process_tag}PQ >>> Product query for id {product_id} has returned a valid response...')
 
@@ -398,7 +413,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                 logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title_log}.')
 
                 if can_query_v2:
-                    gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
+                    gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session, db_connection)
 
             elif entry_count == 1:
                 # do not update existing entries in a full or builds scan, since update/delta scans will take care of that
@@ -437,7 +452,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
 
                     if can_query_v2:
-                        gog_product_v2_query(process_tag, product_id, db_lock, session, db_connection)
+                        gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session, db_connection)
 
         # existing ids return a 404 HTTP error code on removal
         elif scan_mode == 'update' and response.status_code == 404:
@@ -492,7 +507,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, db_lock, sess
         #logger.error(traceback.format_exc())
         return (False, None)
 
-def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_connection):
+def gog_product_games_catalog_query(parameters, scan_mode, https_proxy, db_lock, session, db_connection):
 
     catalog_url = f'https://catalog.gog.com/v1/catalog?{parameters}'
 
@@ -502,11 +517,19 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
     pages = 0
 
     try:
-        response = session.get(catalog_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(catalog_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+            # NOTE: The HTTPS proxy will not automatically refresh the IP if the connection is throttled,
+            # however its use will allow the script to run during a temporary IP ban
+        else:
+            response = session.get(catalog_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'GQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK:
+        if response.status_code == ConstantsInterface.HTTP_OK:
             gogData_json = json.loads(response.text, object_pairs_hook=OrderedDict)
 
             # return the number of pages, as listed in the response
@@ -536,7 +559,7 @@ def gog_product_games_catalog_query(parameters, scan_mode, db_lock, session, db_
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'GQ >>> Reprocessing id {product_id}...')
     
-                        retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, db_lock,
+                        retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, https_proxy, db_lock,
                                                                                    session, db_connection)
     
                         if not retries_complete:
@@ -804,7 +827,7 @@ def gog_files_extract_parser(db_connection, product_id):
 
     db_connection.commit()
 
-def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session, db_connection):
+def gog_products_bulk_query(process_tag, product_id, scan_mode, https_proxy, db_lock, session, db_connection):
     # generate a string of comma separated ids in the current batch
     product_ids_string = ','.join([str(product_id_value) for product_id_value in
                                    range(product_id, product_id + IDS_IN_BATCH) if product_id_value not in SKIP_IDS])
@@ -814,11 +837,17 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
     bulk_products_url = f'https://api.gog.com/products?ids={product_ids_string}'
 
     try:
-        response = session.get(bulk_products_url, timeout=HTTP_TIMEOUT)
+        # use an HTTPS proxy if configured to do so
+        if https_proxy:
+            response = session.get(bulk_products_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   proxies=ProxyInterface.PROXIES, timeout=HTTP_TIMEOUT)
+        else:
+            response = session.get(bulk_products_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
+                                   timeout=HTTP_TIMEOUT)
 
         logger.debug(f'{process_tag}BQ >>> HTTP response code: {response.status_code}.')
 
-        if response.status_code == HTTP_OK and response.text != '[]':
+        if response.status_code == ConstantsInterface.HTTP_OK and response.text != '[]':
             logger.info(f'{process_tag}BQ >>> Found something in the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range...')
 
             json_parsed = json.loads(response.text, object_pairs_hook=OrderedDict)
@@ -834,7 +863,7 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
                         sleep(RETRY_SLEEP_INTERVAL)
                         logger.warning(f'{process_tag}BQ >>> Reprocessing id {current_product_id}...')
 
-                    retries_complete, http_status = gog_product_extended_query(process_tag, current_product_id, scan_mode, db_lock,
+                    retries_complete, http_status = gog_product_extended_query(process_tag, current_product_id, scan_mode, https_proxy, db_lock,
                                                                                session, db_connection)
 
                     if retries_complete:
@@ -849,7 +878,7 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
                             retry_counter += 1
 
         # this should not be handled as an exception, as it's the default behavior when nothing is detected
-        elif response.status_code == HTTP_OK and response.text == '[]':
+        elif response.status_code == ConstantsInterface.HTTP_OK and response.text == '[]':
             logger.debug(f'{process_tag}BQ >>> A blank list entry ([]) received.')
 
         else:
@@ -858,6 +887,12 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
             raise Exception()
 
         return True
+
+    # atempt a proxy restart in case of a timeout by raising an exception to the workload_dispatcher
+    except requests.Timeout:
+        logger.warning(f'{process_tag}BQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds '
+                       f'for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+        raise Exception()
 
     # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
@@ -874,10 +909,14 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock, session
         # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
 
+        # raise exception to the workload_dispatcher in case the proxy server needs to be restarted
+        if response.status_code is not None and response.status_code in ConstantsInterface.PROXY_RESTART_HTTP_CODES:
+            raise Exception()
+
         return False
 
 def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
-                   fail_event, terminate_event):
+                   proxy_lock, https_proxy, proxy_event, fail_event, terminate_event):
     # catch SIGTERM and exit gracefully
     signal.signal(signal.SIGTERM, sigterm_handler)
     # catch SIGINT and exit gracefully
@@ -890,30 +929,109 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
 
         try:
             while not terminate_event.is_set():
-                product_id = id_queue.get(True, QUEUE_WAIT_TIMEOUT)
+                product_id = id_queue.get(True, ConstantsInterface.QUEUE_WAIT_TIMEOUT)
 
                 retry_counter = 0
+                proxy_retry_counter = 0
                 retries_complete = False
+                proxy_restart = False
 
                 while not retries_complete and not terminate_event.is_set():
                     if retry_counter > 0:
                         logger.debug(f'{process_tag}>>> Retry count: {retry_counter}.')
-                        # main iteration incremental sleep
-                        sleep((INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
 
-                        retries_complete = gog_products_bulk_query(process_tag, product_id, scan_mode, db_lock,
-                                                                   processSession, process_db_connection)
+                        if https_proxy:
+                            if not proxy_event.is_set():
+                                #reset HTTP session
+                                processSession = requests.Session()
+                                logger.debug(f'{process_tag}>>> Waiting for HTTPS proxy event...')
+                            else:
+                                # non-incremental sleep, in case of unexpected HTTP errors
+                                # (such as 500) that will not trigger a proxy restart
+                                sleep(RETRY_SLEEP_INTERVAL)
 
-                    if retries_complete:
-                        if retry_counter > 0:
-                            logger.info(f'{process_tag}>>> Succesfully retried for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+                            proxy_event.wait()
+
+                        else:
+                            # main iteration incremental sleep
+                            sleep((INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
+
+                    # skip any processing on wakeup of unsuccessful proxy restarts
+                    if not terminate_event.is_set():
+                        try:
+                            retries_complete = gog_products_bulk_query(process_tag, product_id, scan_mode, https_proxy, db_lock,
+                                                                       processSession, process_db_connection)
+                        # exceptions should only be raised to trigger proxy restarts
+                        except:
+                            if https_proxy:
+                                with proxy_lock:
+                                    # determine event state in a lock to avoid multiple processes performing proxy restarts
+                                    if proxy_event.is_set():
+                                        proxy_event.clear()
+                                        proxy_restart = True
+
+                                # restart the proxy only on the process that has cleared the proxy_event
+                                if proxy_restart:
+                                    while not retries_complete and not terminate_event.is_set():
+                                        proxy_retry_counter += 1
+
+                                        if proxy_retry_counter > RETRY_COUNT:
+                                            logger.warning(f'{process_tag}>>> HTTPS proxy IP refresh unsuccessful.')
+                                            fail_event.set()
+                                            terminate_event.set()
+                                            # allow other worker threads to terminate instead of waiting
+                                            proxy_event.set()
+
+                                        else:
+                                            logger.debug(f'{process_tag}>>> HTTPS proxy retry count: {proxy_retry_counter}.')
+                                            # proxy iteration incremental sleep
+                                            sleep((INCREMENTAL_RETRY_BASE ** (proxy_retry_counter - 1)) * RETRY_SLEEP_INTERVAL)
+
+                                            logger.warning(f'{process_tag}>>> HTTPS proxy trigger received. '
+                                                           f'Refreshing HTTPS proxy IP ({proxy_retry_counter})...')
+                                            ProxyInterface.get_new_proxy_ip()
+                                            logger.info(f'{process_tag}>>> HTTPS proxy IP refresh complete.')
+
+                                            try:
+                                                # reset HTTP session
+                                                processSession = requests.Session()
+                                                retries_complete = gog_products_bulk_query(process_tag, product_id, scan_mode, https_proxy, db_lock,
+                                                                                           processSession, process_db_connection)
+                                            except:
+                                                retries_complete = False
+
+                            else:
+                                logger.critical(f'{process_tag}>>> HTTP exception received. Stopping script!')
+                                fail_event.set()
+                                terminate_event.set()
+
+                        if retries_complete:
+                            # should only worry about proxy_event in case the proxy_iteration_counter is not 0
+                            if proxy_retry_counter > 0:
+                                logger.info(f'{process_tag}>>> Succesfully retried for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+
+                                # reset the proxy_event if a query is successful
+                                if not proxy_event.is_set():
+                                    # mark the proxy_event as no longer pending
+                                    proxy_event.set()
+                                    logger.debug(f'{process_tag}>>> HTTPS proxy retry released.')
+
+                            elif retry_counter > 0:
+                                logger.info(f'{process_tag}>>> Succesfully retried for the {product_id} <-> {product_id + IDS_IN_BATCH - 1} range.')
+
+                        else:
+                            retry_counter += 1
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
+                                fail_event.set()
+                                terminate_event.set()
+                                if https_proxy:
+                                    # mark the proxy_event as no longer pending
+                                    proxy_event.set()
+
                     else:
-                        retry_counter += 1
-                        # terminate the scan if the RETRY_COUNT limit is exceeded
-                        if retry_counter > RETRY_COUNT:
-                            logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
-                            fail_event.set()
-                            terminate_event.set()
+                        logger.info(f'{process_tag}>>> Terminating after unsuccessful HTTPS proxy IP refresh...')
 
                 if product_id % ID_SAVE_INTERVAL == 0 and not terminate_event.is_set():
                     with config_lock:
@@ -934,9 +1052,8 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
 
         logger.info(f'{process_tag}>>> Stopping worker process...')
 
-        logger.debug(f'{process_tag}>>> Running PRAGMA optimize...')
         with db_lock:
-            process_db_connection.execute(OPTIMIZE_QUERY)
+            process_db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
 if __name__ == "__main__":
     # catch SIGTERM and exit gracefully
@@ -994,6 +1111,16 @@ if __name__ == "__main__":
         # ids that don't have a valid v2 endpoint for some reason
         NO_V2_ENDPOINT = [int(product_id.strip()) for product_id in
                           general_section.get('no_v2_endpoint').split(',') if product_id != '']
+
+        # parsing proxy parameters
+        proxy_section = configParser['PROXY']
+        HTTPS_PROXY = PROXY_INTERFACE_IS_IMPORTED and proxy_section.getboolean('https_proxy')
+        START_PROXY = proxy_section.getboolean('start_proxy')
+        # the proxy path can be relative to the user's home folder
+        PROXY_BINARY_PATH = os.path.expanduser(proxy_section.get('proxy_binary_path'))
+        PROXY_CONF_PATH = os.path.expanduser(proxy_section.get('proxy_conf_path'))
+        # parsing constants
+        PROXY_STARTUP_DELAY = proxy_section.getint('proxy_startup_delay')
     except:
         logger.critical('Could not parse configuration file. Please make sure the appropriate structure is in place!')
         raise SystemExit(1)
@@ -1050,14 +1177,32 @@ if __name__ == "__main__":
             copy2(DB_FILE_PATH, DB_FILE_PATH + '.bak')
             logger.info('Successfully created db backup.')
         else:
-            #subprocess.run(['python', 'gog_create_db.py'])
             logger.critical('Could find specified DB file!')
             raise SystemExit(4)
+
+    # for HTTPS proxy use
+    if HTTPS_PROXY:
+        logger.warning('+++ HTTPS proxy mode enabled +++')
+
+        # set up the proxy interface
+        ProxyInterface.logger = logger
+        ProxyInterface.proxy_binary_path = PROXY_BINARY_PATH
+        ProxyInterface.proxy_conf_path = PROXY_CONF_PATH
+        ProxyInterface.proxy_startup_delay = PROXY_STARTUP_DELAY
+
+        if START_PROXY:
+            logger.info('Starting HTTPS proxy process...')
+            # optionally also stop any existing proxy instances
+            #ProxyInterface.stop_proxy_process()
+            ProxyInterface.start_proxy_process()
 
     # inter-process resources locks
     db_lock = multiprocessing.Lock()
     config_lock = multiprocessing.Lock()
+    proxy_lock = multiprocessing.Lock()
     # shared process events
+    proxy_event = multiprocessing.Event()
+    proxy_event.set()
     terminate_event = multiprocessing.Event()
     terminate_event.clear()
     fail_event = multiprocessing.Event()
@@ -1094,16 +1239,16 @@ if __name__ == "__main__":
 
                 process = multiprocessing.Process(target=worker_process,
                                                   args=(process_tag_nice, scan_mode, id_queue, db_lock, config_lock,
-                                                        fail_event, terminate_event),
+                                                        proxy_lock, HTTPS_PROXY, proxy_event, fail_event, terminate_event),
                                                   daemon=True)
                 process.start()
                 process_list.append(process)
-                sleep(PROCESS_START_WAIT_INTERVAL)
+                sleep(ConstantsInterface.PROCESS_START_WAIT_INTERVAL)
 
             while not stop_id_reached and not terminate_event.is_set():
                 try:
                     # pass only the start product_id for the current batch
-                    id_queue.put(product_id, True, QUEUE_WAIT_TIMEOUT)
+                    id_queue.put(product_id, True, ConstantsInterface.QUEUE_WAIT_TIMEOUT)
                     # skip an IDS_IN_BATCH interval
                     product_id += IDS_IN_BATCH
 
@@ -1167,7 +1312,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
     
                             if retries_complete:
@@ -1200,8 +1345,7 @@ if __name__ == "__main__":
 
                         logger.info(f'Saved scan up to last_id of {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -1230,7 +1374,7 @@ if __name__ == "__main__":
                         new_params = ''.join(('limit=48&releaseStatuses=in:new-arrival&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=',
                                               # locales and currency don't matter here, but emulate default GOG website behavior
                                               str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
-                        retries_complete, new_page_count = gog_product_games_catalog_query(new_params, scan_mode, db_lock,
+                        retries_complete, new_page_count = gog_product_games_catalog_query(new_params, scan_mode, HTTPS_PROXY, db_lock,
                                                                                            session, db_connection)
 
                         if retries_complete:
@@ -1265,7 +1409,7 @@ if __name__ == "__main__":
                         upcoming_params = ''.join(('limit=48&releaseStatuses=in:upcoming&order=desc:releaseDate&productType=in:game,pack,dlc,extras&page=',
                                                    # locales and currency don't matter here, but emulate default GOG website behavior
                                                    str(page_no), '&countryCode=BE&locale=en-US&currencyCode=EUR'))
-                        retries_complete, upcoming_page_count = gog_product_games_catalog_query(upcoming_params, scan_mode, db_lock,
+                        retries_complete, upcoming_page_count = gog_product_games_catalog_query(upcoming_params, scan_mode, HTTPS_PROXY, db_lock,
                                                                                                 session, db_connection)
 
                         if retries_complete:
@@ -1282,8 +1426,7 @@ if __name__ == "__main__":
                                 fail_event.set()
                                 terminate_event.set()
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -1313,7 +1456,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
     
                             if retries_complete:
@@ -1334,8 +1477,7 @@ if __name__ == "__main__":
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -1366,7 +1508,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
     
                             if retries_complete:
@@ -1387,8 +1529,7 @@ if __name__ == "__main__":
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -1409,8 +1550,7 @@ if __name__ == "__main__":
 
                     gog_files_extract_parser(db_connection, current_product_id)
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -1446,7 +1586,7 @@ if __name__ == "__main__":
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'Reprocessing id {product_id}...')
 
-                        retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, db_lock,
+                        retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                    session, db_connection)
 
                         if retries_complete:
@@ -1465,8 +1605,7 @@ if __name__ == "__main__":
                                     fail_event.set()
                                     terminate_event.set()
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
@@ -1495,7 +1634,7 @@ if __name__ == "__main__":
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
     
-                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, db_lock,
+                            retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
     
                             if retries_complete:
@@ -1516,12 +1655,14 @@ if __name__ == "__main__":
                     else:
                         logger.warning(f'Skipping the following id: {current_product_id}.')
 
-                logger.debug('Running PRAGMA optimize...')
-                db_connection.execute(OPTIMIZE_QUERY)
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
 
         except SystemExit:
             terminate_event.set()
             logger.info('Stopping delisted scan...')
+
+    if HTTPS_PROXY and START_PROXY:
+        ProxyInterface.stop_proxy_process()
 
     if not terminate_event.is_set() and scan_mode == 'update':
         logger.info('Resetting last_id parameter...')

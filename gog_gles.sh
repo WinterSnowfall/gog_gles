@@ -1,32 +1,53 @@
 #!/bin/bash
 
+DAYOFWEEK=$(date +"%u")
+# change to your preferred day of the week
+WEEKLYSCANDAY=6
+
 cd scripts
 
-python3 gog_forums_scan.py
+./gog_forums_scan.py
 
-python3 gog_products_scan.py -n
-python3 gog_products_scan.py -u
-#uncomment if you also want to recheck delisted ids
-#python3 gog_products_scan.py -d
-python3 gog_products_scan.py -e
+./gog_support_scan.py
 
-python3 gog_builds_scan.py -u
-#uncomment if you also want to recheck removed builds
-#python3 gog_builds_scan.py -r
-#uncomment if you want to track differences between
-#offline installers and Galaxy builds (delta scan)
-#python3 gog_builds_scan.py -d
+./gog_products_scan.py -n
+./gog_products_scan.py -u
+./gog_products_scan.py -e
 
-python3 gog_prices_scan.py -u
+./gog_builds_scan.py -u
+./gog_builds_scan.py -p
+./gog_builds_scan.py -d
 
-python3 gog_ratings_scan.py -u
+./gog_products_scan.py -b
 
-#uncomment if you want to generate statistical charts
-#python3 gog_plot_gen.py -t -f id
-#python3 gog_plot_gen.py -t -f release
-#python3 gog_plot_gen.py -d
-#only relevant if you set the correct CUTOFF_DATE
-#python3 gog_plot_gen.py -i
+if [ $DAYOFWEEK = $WEEKLYSCANDAY ]
+then
+    ./gog_builds_scan.py -r
+
+    ./gog_releases_scan.py -u
+    ./gog_releases_scan.py -p
+    ./gog_releases_scan.py -r
+
+    ./gog_products_scan.py -r
+    ./gog_products_scan.py -d
+
+    # can be moved outside of the weekly scan block
+    # if more regular pricing updates are preferred
+    ./gog_prices_scan.py -u
+    ./gog_prices_scan.py -a
+
+    # can be moved outside of the weekly scan block
+    # if more regular ratings updates are preferred
+    ./gog_ratings_scan.py -u
+    ./gog_ratings_scan.py -r
+
+    # uncomment if you want to generate statistical charts
+    #./gog_plot_gen.py -t -f id
+    #./gog_plot_gen.py -t -f release
+    #./gog_plot_gen.py -d
+    # only relevant if you set the correct cutoff_date
+    #./gog_plot_gen.py -i
+fi
 
 cd ..
 

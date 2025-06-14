@@ -1,4 +1,12 @@
+**/__pycache__
+conf/gog_cs_decompress.conf
+conf/gog_products_scan.conf
 export/
 logs/
+output_cs/
 output_db/
 output_plot/
+scripts/gog_cs_decompress.py
+scripts/common/gog_proxy_interface.py
+sql/airtable_*.sql
+utils/

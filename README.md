@@ -9,11 +9,11 @@ It provides several python3 scripts which call publicly available GOG APIs in or
 
 **1.** You will need a **python3.6+** environment. Most Linux distros will come with python3 installed - make sure you pick one which comes with **python 3.6** or above.
 
-**2.** The following python3 packages need to be installed: `html2text, requests, lxml, matplotlib, tk`
+**2.** The following python3 packages need to be installed: `html2text, requests, brotli, lxml, matplotlib, tk, cloudscraper`
 
 On Linux, you will need to install the packages using the distro's default package manager. For Debian-based/derived distros, this should do the trick:
 ```
-sudo apt-get install python3-html2text python3-requests python3-lxml python3-matplotlib python3-tk
+sudo apt-get install python3-html2text python3-requests python3-brotli python3-lxml python3-matplotlib python3-tk python3-cloudscraper
 ```
 
 **3.** Switch to the scripts directory:
@@ -41,12 +41,12 @@ python3 gog_products_scan.py -f
 The scan can be stopped at any point in time and will resume from where it left off once you run it again. You can, in theory, increase the thread count in the *gog_products_scan.conf* file to speed things up, but you risk getting throttled or even getting your IP temporarily banned by GOG. Sticking with the defaults is recommended.
 
 
-**7.** Populate initial installer & patch data (*installer/file table*) - this info will be extracted from the data previously collected during the full product id scan:
+**7.** Populate initial installer & patch data (*file table*) - this info will be extracted from the data previously collected during the full product id scan:
 ```
 python3 gog_products_scan.py -e
 ```
 
-**8.** Do an initial query of (Galaxy) builds using all the previously extracted product ids
+**8.** Do an initial query of (Galaxy) builds using all the previously extracted product ids:
 ```
 python3 gog_builds_scan.py -p
 ```
@@ -64,9 +64,21 @@ python3 gog_prices_scan.py -u
 python3 gog_ratings_scan.py -u
 ```
 
+**11.** Do an initial query of (Galaxy) releases using all the previously extracted product ids:
+
+```
+python3 gog_releases_scan.py -p
+```
+
+**12.** Populate initial support page data:
+
+```
+python3 gog_support_scan.py
+```
+
 You're now good to go!
 
-All 3 database tables should be populated with data. This is essentially a snapshot of all the game ids, associated installer/file entries and (optionally) prices reported by the GOG APIs.
+All database tables should be populated with data. This is essentially a snapshot of all the game ids, associated installer/file entries, ratings, releases, support pages and (optionally) prices reported by the GOG APIs.
 
 ## How do I handle update scans?
 
@@ -86,6 +98,38 @@ You can now run the provided SQL queries against the *gog_gles.db* file to list 
 The *gog_prices_scan.py* script will retrieve pricing data for configured currencies (or *all* currencies, as reported by the API) in a certain region. Multiple regions may be kept track of, but would require separate scans with the *country_code* parameter set accordingly in the config file.
 
 Pricing scans will automatically be triggered by update scans, as described above - price changes will be logged as new entries while exiting ones will be outdated, in the interest of tracking historical data and trends. I've also included an sql script for listing discounts based on collected data.
+
+## Do you support the use of HTTP/HTTPS proxies?
+
+Yes, HTTP/HTTPS proxy support is included in all the scan scripts, with automatic handling of retries in case of errors and/or throttling from GOG. Note, however, that you must provide your own proxy interface implementation (part of *scripts/common/gog_proxy_interface.py*), with the following structure:
+
+```
+class ProxyInterface:
+    # types and URLs of used proxies
+    PROXIES = {
+        'http': 'http://127.0.0.1:8080',
+        'https': 'https://127.0.0.1:8081'
+    }
+
+    logger = None
+    proxy_binary_path = None
+    proxy_conf_path = None
+    proxy_startup_delay = 0
+
+    @classmethod
+    def start_proxy_process(cls):
+        [...]
+
+    @classmethod
+    def stop_proxy_process(cls):
+        [...]
+
+    @classmethod
+    def get_new_proxy_ip(cls):
+        [...]
+```
+
+The static methods are called, respectively: to start up the proxy process, to terminate the proxy process and to trigger an IP refresh while the proxy process is running. Should the import of the proxy interface module mentioned above fail (this will happen in case an implementation is not provided), then proxy support will be disabled globally, regardless of configuration file settings.
 
 ## Disclaimer
 
