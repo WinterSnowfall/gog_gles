@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.00
-@date: 14/06/2025
+@version: 5.01
+@date: 11/07/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -233,18 +233,21 @@ def gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session,
                     if properties == '': properties = None
                 except KeyError:
                     properties = None
-                # process series - these may be 'null' and return a TypeError
+                # process series - the field may be absent and return a KeyError
                 try:
                     series = json_v2_parsed['_embedded']['series']['name'].strip()
-                except TypeError:
+                except KeyError:
                     series = None
                 # process features
                 features = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
                 if features == '': features = None
                 # process is_using_dosbox
                 is_using_dosbox = json_v2_parsed['isUsingDosBox']
-                # proces links
-                links_store = json_v2_parsed['_links']['store']['href']
+                # proces links - the 'store' field may be absent and return a KeyError
+                try:
+                    links_store = json_v2_parsed['_links']['store']['href']
+                except KeyError:
+                    links_store = None
                 links_support = json_v2_parsed['_links']['support']['href']
                 links_forum = json_v2_parsed['_links']['forum']['href']
                 # process description
