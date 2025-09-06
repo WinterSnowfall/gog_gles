@@ -65,6 +65,17 @@ UPDATE_ID_QUERY = ('UPDATE gog_products SET gp_int_updated = ?, '
                    'gp_int_json_diff = ?, '
                    'gp_changelog = ? WHERE gp_id = ?')
 
+UPDATE_ID_QUERY_NO_V2 = ('UPDATE gog_products SET gp_int_updated = ?, '
+                         'gp_int_json_payload = ?, '
+                         'gp_int_json_diff = ?, '
+                         'gp_changelog = ?, '
+                         'gp_v2_title = ?, '
+                         'gp_v2_gog_release_date = ?, '
+                         'gp_v2_links_store = ?, '
+                         'gp_v2_links_support = ?, '
+                         'gp_v2_links_forum = ?, '
+                         'gp_v2_description = ? WHERE gp_id = ?')
+
 UPDATE_ID_V2_QUERY = ('UPDATE gog_products SET gp_int_v2_updated = ?, '
                       'gp_int_v2_json_payload = ?, '
                       'gp_int_v2_json_diff = ?, '
@@ -447,10 +458,23 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                             diff_formatted = None
 
                         with db_lock:
-                            # gp_int_updated, gp_int_json_payload,
-                            # gp_int_json_diff, gp_changelog, gp_id (WHERE clause)
-                            db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted,
-                                                                diff_formatted, changelog, product_id))
+                            if can_query_v2:
+                                # gp_int_updated, gp_int_json_payload,
+                                # gp_int_json_diff, gp_changelog, gp_id (WHERE clause)
+                                db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted,
+                                                                    diff_formatted, changelog, product_id))
+                            else:
+                                # for IDs that don't have a valid v2 API endpoint, we need to rely
+                                # on the title value in the current payload, as what we store can be NULL
+                                product_title = json_parsed['title'].strip()
+                                # gp_int_updated, gp_int_json_payload,
+                                # gp_int_json_diff, gp_changelog, gp_v2_title, gp_v2_gog_release_date,
+                                # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
+                                # gp_v2_description, gp_id (WHERE clause)
+                                db_cursor.execute(UPDATE_ID_QUERY_NO_V2, (datetime.now().isoformat(' '), json_formatted,
+                                                                          diff_formatted, changelog, product_title, gog_release_date,
+                                                                          links_store, links_support, links_forum,
+                                                                          description, product_id))
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
 
