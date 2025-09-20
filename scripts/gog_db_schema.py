@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.00
-@date: 14/06/2025
+@version: 5.10
+@date: 20/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -78,7 +78,7 @@ CREATE_GOG_PRICES_QUERY = ('CREATE TABLE gog_prices (gpr_int_nr INTEGER PRIMARY 
                            'gpr_int_added TEXT NOT NULL, '
                            'gpr_int_outdated TEXT, '
                            'gpr_int_id INTEGER NOT NULL, '
-                           'gpr_int_title TEXT NOT NULL, '
+                           'gpr_int_title TEXT, '
                            'gpr_int_country_code TEXT NOT NULL, '
                            'gpr_currency TEXT NOT NULL, '
                            'gpr_base_price REAL NOT NULL, '

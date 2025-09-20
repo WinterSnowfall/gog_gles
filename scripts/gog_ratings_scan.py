@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.00
-@date: 14/06/2025
+@version: 5.10
+@date: 20/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -420,27 +420,27 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_signal:
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete = gog_reviews_query(current_product_id, HTTPS_PROXY,
                                                                  session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
-    
+
                                 last_id_counter += 1
-    
+
                             else:
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
@@ -477,25 +477,25 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_signal:
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete = gog_reviews_query(current_product_id, HTTPS_PROXY,
                                                                  session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
-    
+
                             else:
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.00
-@date: 14/06/2025
+@version: 5.10
+@date: 20/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -483,7 +483,7 @@ if __name__ == "__main__":
         # parsing proxy parameters
         proxy_section = configParser['PROXY']
         HTTPS_PROXY = PROXY_INTERFACE_IS_IMPORTED and proxy_section.getboolean('https_proxy')
-        START_PROXY = proxy_section.getboolean('start_proxy') 
+        START_PROXY = proxy_section.getboolean('start_proxy')
         # these paths can be relative to the user's home folder
         PROXY_BINARY_PATH = os.path.expanduser(proxy_section.get('proxy_binary_path'))
         PROXY_CONF_PATH = os.path.expanduser(proxy_section.get('proxy_conf_path'))
@@ -602,7 +602,7 @@ if __name__ == "__main__":
                         logger.debug(f'Processing the following id: {product_id}.')
                     else:
                         logger.warning(f'Skipping the following id: {product_id}.')
-                        
+
                     product_id += 1
 
                     if product_id > STOP_ID:
@@ -653,29 +653,29 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
-    
+
                         for os_value in SUPPORTED_OSES:
                             retries_complete = False
                             retry_counter = 0
-    
+
                             while not retries_complete and not terminate_event.is_set():
                                 if retry_counter > 0:
                                     sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
                                     logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                                     sleep(sleep_interval)
-    
+
                                 retries_complete = gog_builds_query('', current_product_id, os_value, scan_mode,
                                                                     HTTPS_PROXY, db_lock, session, db_connection)
-    
+
                                 if retries_complete:
                                     if retry_counter > 0:
                                         logger.info(f'Succesfully retried for {current_product_id}, {os_value}.')
-    
+
                                     last_id_counter += 1
-    
+
                                 else:
                                     retry_counter += 1
                                     # terminate the scan if the RETRY_COUNT limit is exceeded
@@ -716,23 +716,23 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
-    
+
                         for os_value in SUPPORTED_OSES:
                             retries_complete = False
                             retry_counter = 0
-    
+
                             while not retries_complete and not terminate_event.is_set():
                                 if retry_counter > 0:
                                     sleep_interval = (INCREMENTAL_RETRY_BASE ** (retry_counter - 1)) * RETRY_SLEEP_INTERVAL
                                     logger.info(f'Sleeping for {sleep_interval} seconds due to throttling...')
                                     sleep(sleep_interval)
-    
+
                                 retries_complete = gog_builds_query('', current_product_id, os_value, scan_mode,
                                                                     HTTPS_PROXY, db_lock, session, db_connection)
-    
+
                                 if retries_complete:
                                     if retry_counter > 0:
                                         logger.info(f'Succesfully retried for {current_product_id}, {os_value}.')
@@ -952,7 +952,7 @@ if __name__ == "__main__":
         except ValueError:
             logger.critical('Could not parse id list!')
             raise SystemExit(4)
-        
+
         if len(id_list) == 0:
             logger.warning('Nothing to scan!')
             raise SystemExit(0)
@@ -1003,23 +1003,23 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.info(f'Running scan for id {current_product_id}...')
-    
+
                         for os_value in SUPPORTED_OSES:
                             retries_complete = False
                             retry_counter = 0
-    
+
                             while not retries_complete and not terminate_event.is_set():
                                 if retry_counter > 0:
                                     logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                     sleep(RETRY_SLEEP_INTERVAL)
                                     logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                                 retries_complete = gog_builds_query('', current_product_id, os_value, scan_mode,
                                                                     HTTPS_PROXY, db_lock, session, db_connection)
-    
+
                                 if retries_complete:
                                     if retry_counter > 0:
                                         logger.info(f'Succesfully retried for {current_product_id}, {os_value}.')

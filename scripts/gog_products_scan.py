@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.01
-@date: 11/07/2025
+@version: 5.10
+@date: 20/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -144,7 +144,7 @@ def parse_html_data(html_content):
 
     return html_content_parsed
 
-def gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session, db_connection):
+def gog_product_v2_query(process_tag, product_id, https_proxy, session):
 
     product_url = f'https://api.gog.com/v2/games/{product_id}?locale=en-US'
 
@@ -163,145 +163,13 @@ def gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session,
 
         if response.status_code == ConstantsInterface.HTTP_OK:
             logger.debug(f'{process_tag}2Q >>> Product v2 query for id {product_id} has returned a valid response...')
+            return response
 
-            # ignore unicode control characters which can be part of game descriptions and/or changelogs;
-            # these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes
-            # even with unicode conversions from and to the db... why do you do this, GOG, why???
-            filtered_response = JSON_UNICODE_REMOVAL_REGEX.sub('', response.text)
-
-            json_v2_parsed = json.loads(filtered_response, object_pairs_hook=OrderedDict)
-            json_v2_formatted = json.dumps(json_v2_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
-
-            db_cursor = db_connection.execute('SELECT gp_int_v2_json_payload FROM gog_products WHERE gp_id = ?', (product_id,))
-            existing_v2_json_formatted = db_cursor.fetchone()[0]
-
-            if existing_v2_json_formatted != json_v2_formatted:
-                if existing_v2_json_formatted is not None:
-                    logger.debug(f'{process_tag}2Q >>> Existing v2 data for {product_id} is outdated. Updating...')
-
-                # calculate the diff between the new json and the previous one
-                # (applying the diff on the new json will revert to the previous version)
-                if existing_v2_json_formatted is not None:
-                    diff_v2_formatted = ''.join([line for line in difflib.unified_diff(json_v2_formatted.splitlines(1),
-                                                                                       existing_v2_json_formatted.splitlines(1), n=0)])
-                else:
-                    diff_v2_formatted = None
-
-                # process product title
-                product_title = json_v2_parsed['_embedded']['product']['title'].strip()
-                # process product type
-                product_type = json_v2_parsed['_embedded']['productType']
-                # process developer/publisher
-                developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
-                publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
-                # process size (MB value)
-                size = json_v2_parsed['size']
-                # process preorder status
-                is_preorder = json_v2_parsed['_embedded']['product']['isPreorder']
-                # process in development status
-                in_development = json_v2_parsed['inDevelopment']['active']
-                # process installable status
-                is_installable = json_v2_parsed['_embedded']['product']['isInstallable']
-                # process individual os support
-                supported_oses = json_v2_parsed['_embedded']['supportedOperatingSystems']
-                os_support_windows = False
-                os_support_linux = False
-                os_support_osx = False
-                for os_value in supported_oses:
-                    if os_value['operatingSystem']['name'] == SUPPORTED_OSES[0]:
-                        os_support_windows = True
-                    elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[1]:
-                        os_support_linux = True
-                    elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[2]:
-                        os_support_osx = True
-                # process supported os versions
-                supported_os_versions = ConstantsInterface.MVF_VALUE_SEPARATOR.join(os_value['operatingSystem']['versions'] for os_value in supported_oses
-                                                                                    #some ids have empty versions strings for certain oses...
-                                                                                    if os_value['operatingSystem']['versions'] != '')
-                # process global release date
-                try:
-                    global_release_date = json_v2_parsed['_embedded']['product']['globalReleaseDate']
-                    if global_release_date is not None:
-                        # ISO 8601 allows omitting the T delimiter in the extended format
-                        # and sqlite datetime functions use RFC 3339, which omits it by default
-                        global_release_date = global_release_date.replace('T', ' ')
-                except KeyError:
-                    global_release_date = None
-                # process GOG release date
-                gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate']
-                if gog_release_date is not None:
-                    # ISO 8601 allows omitting the T delimiter in the extended format
-                    # and sqlite datetime functions use RFC 3339, which omits it by default
-                    gog_release_date = gog_release_date.replace('T', ' ')
-                # process tags
-                tags = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
-                if tags == '': tags = None
-                # process properties (tee is used for avoiding a reserved name) - the field may be absent and return a KeyError
-                try:
-                    # ideally should not need a strip, but there are a few entries with extra whitespace here and there
-                    properties = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([propertee['name'].strip() for propertee in
-                                                                             json_v2_parsed['_embedded']['properties']]))
-                    if properties == '': properties = None
-                except KeyError:
-                    properties = None
-                # process series - the field may be absent and return a KeyError
-                try:
-                    series = json_v2_parsed['_embedded']['series']['name'].strip()
-                except KeyError:
-                    series = None
-                # process features
-                features = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
-                if features == '': features = None
-                # process is_using_dosbox
-                is_using_dosbox = json_v2_parsed['isUsingDosBox']
-                # proces links - the 'store' field may be absent and return a KeyError
-                try:
-                    links_store = json_v2_parsed['_links']['store']['href']
-                except KeyError:
-                    links_store = None
-                links_support = json_v2_parsed['_links']['support']['href']
-                links_forum = json_v2_parsed['_links']['forum']['href']
-                # process description
-                try:
-                    description = parse_html_data(json_v2_parsed['description'])
-                    # ignore some bogus/placeholder descriptions (probably autogenerated)
-                    if description.startswith('product_description_'):
-                        description = None
-                except AttributeError:
-                    description = None
-                # process localizations
-                localizations = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([LOCALIZATION_SEPARATOR.join((localization['_embedded']['language']['code'],
-                                                                                                                 localization['_embedded']['localizationScope']['type']))
-                                                                                    for localization in json_v2_parsed['_embedded']['localizations']]))
-                if localizations == '': localizations = None
-
-                with db_lock:
-                    # gp_int_v2_updated, gp_int_v2_json_payload,
-                    # gp_int_v2_previous_json_diff, gp_v2_title, gp_v2_product_type, gp_v2_developer,
-                    # gp_v2_publisher, gp_v2_size, gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
-                    # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
-                    # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
-                    # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features,
-                    # gp_v2_is_using_dosbox, gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
-                    # gp_v2_description, gp_v2_localizations, gp_id (WHERE clause)
-                    db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now().isoformat(' '), json_v2_formatted,
-                                                           diff_v2_formatted, product_title, product_type, developer,
-                                                           publisher, size, is_preorder, in_development, is_installable,
-                                                           os_support_windows, os_support_linux, os_support_osx,
-                                                           supported_os_versions, global_release_date, gog_release_date,
-                                                           tags, properties, series, features,
-                                                           is_using_dosbox, links_store, links_support, links_forum,
-                                                           description, localizations, product_id))
-                    db_connection.commit()
-
-                if existing_v2_json_formatted is not None:
-                    logger.info(f'{process_tag}2Q ~~~ Updated the v2 data for {product_id}: {product_title}.')
-                else:
-                    logger.info(f'{process_tag}2Q +++ Added v2 data for {product_id}: {product_title}.')
-
-        # ids corresponding to movies will return a 404 error, others should not
-        elif response.status_code == 404:
-            logger.warning(f'{process_tag}2Q >>> Product with id {product_id} returned an HTTP 404 error code. Skipping.')
+        # ids corresponding to movies will return a 404 error,
+        # as will other ids that do not have a valid v2 endpoint
+        elif response.status_code == ConstantsInterface.HTTP_NOT_FOUND:
+            logger.debug(f'{process_tag}2Q >>> Product with id {product_id} returned an HTTP 404 error code.')
+            return None
 
         else:
             logger.warning(f'{process_tag}2Q >>> HTTP error code {response.status_code} received for {product_id}.')
@@ -313,28 +181,168 @@ def gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session,
         raise
 
     except:
-        logger.debug(f'{process_tag}2Q >>> Product company query has failed for {product_id}.')
+        logger.debug(f'{process_tag}2Q >>> Product v2 query has failed for {product_id}.')
+        # uncomment for debugging purposes only
+        #logger.error(traceback.format_exc())
+        raise
+
+def gog_product_v2_process_response(process_tag, product_id, response, db_lock, db_connection):
+    try:
+        # ignore unicode control characters which can be part of game descriptions and/or changelogs;
+        # these chars do absolutely nothing relevant but can mess with SQL imports/export and sometimes
+        # even with unicode conversions from and to the db... why do you do this, GOG, why???
+        filtered_response = JSON_UNICODE_REMOVAL_REGEX.sub('', response.text)
+
+        json_v2_parsed = json.loads(filtered_response, object_pairs_hook=OrderedDict)
+        json_v2_formatted = json.dumps(json_v2_parsed, sort_keys=True, indent=4, separators=(',', ': '), ensure_ascii=False)
+
+        db_cursor = db_connection.execute('SELECT gp_int_v2_json_payload FROM gog_products WHERE gp_id = ?', (product_id,))
+        existing_v2_json_formatted = db_cursor.fetchone()[0]
+
+        if existing_v2_json_formatted != json_v2_formatted:
+            if existing_v2_json_formatted is not None:
+                logger.debug(f'{process_tag}2Q >>> Existing v2 data for {product_id} is outdated. Updating...')
+
+            # calculate the diff between the new json and the previous one
+            # (applying the diff on the new json will revert to the previous version)
+            if existing_v2_json_formatted is not None:
+                diff_v2_formatted = ''.join([line for line in difflib.unified_diff(json_v2_formatted.splitlines(1),
+                                                                                   existing_v2_json_formatted.splitlines(1), n=0)])
+            else:
+                diff_v2_formatted = None
+
+            # process product title
+            product_title = json_v2_parsed['_embedded']['product']['title'].strip()
+            # process product type
+            product_type = json_v2_parsed['_embedded']['productType']
+            # process developer/publisher
+            developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
+            publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
+            # process size (MB value)
+            size = json_v2_parsed['size']
+            # process preorder status
+            is_preorder = json_v2_parsed['_embedded']['product']['isPreorder']
+            # process in development status
+            in_development = json_v2_parsed['inDevelopment']['active']
+            # process installable status
+            is_installable = json_v2_parsed['_embedded']['product']['isInstallable']
+            # process individual os support
+            supported_oses = json_v2_parsed['_embedded']['supportedOperatingSystems']
+            os_support_windows = False
+            os_support_linux = False
+            os_support_osx = False
+            for os_value in supported_oses:
+                if os_value['operatingSystem']['name'] == SUPPORTED_OSES[0]:
+                    os_support_windows = True
+                elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[1]:
+                    os_support_linux = True
+                elif os_value['operatingSystem']['name'] == SUPPORTED_OSES[2]:
+                    os_support_osx = True
+            # process supported os versions
+            supported_os_versions = ConstantsInterface.MVF_VALUE_SEPARATOR.join(os_value['operatingSystem']['versions'] for os_value in supported_oses
+                                                                                #some ids have empty versions strings for certain oses...
+                                                                                if os_value['operatingSystem']['versions'] != '')
+            # process global release date
+            try:
+                global_release_date = json_v2_parsed['_embedded']['product']['globalReleaseDate']
+                if global_release_date is not None:
+                    # ISO 8601 allows omitting the T delimiter in the extended format
+                    # and sqlite datetime functions use RFC 3339, which omits it by default
+                    global_release_date = global_release_date.replace('T', ' ')
+            except KeyError:
+                global_release_date = None
+            # process GOG release date
+            gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate']
+            if gog_release_date is not None:
+                # ISO 8601 allows omitting the T delimiter in the extended format
+                # and sqlite datetime functions use RFC 3339, which omits it by default
+                gog_release_date = gog_release_date.replace('T', ' ')
+            # process tags
+            tags = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
+            if tags == '': tags = None
+            # process properties (tee is used for avoiding a reserved name) - the field may be absent and return a KeyError
+            try:
+                # ideally should not need a strip, but there are a few entries with extra whitespace here and there
+                properties = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([propertee['name'].strip() for propertee in
+                                                                                 json_v2_parsed['_embedded']['properties']]))
+                if properties == '': properties = None
+            except KeyError:
+                properties = None
+            # process series - the field may be absent and return a KeyError
+            try:
+                series = json_v2_parsed['_embedded']['series']['name'].strip()
+            except KeyError:
+                series = None
+            # process features
+            features = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([feature['name'] for feature in json_v2_parsed['_embedded']['features']]))
+            if features == '': features = None
+            # process is_using_dosbox
+            is_using_dosbox = json_v2_parsed['isUsingDosBox']
+            # proces links - the 'store' field may be absent and return a KeyError
+            try:
+                links_store = json_v2_parsed['_links']['store']['href']
+            except KeyError:
+                links_store = None
+            links_support = json_v2_parsed['_links']['support']['href']
+            links_forum = json_v2_parsed['_links']['forum']['href']
+            # process description
+            try:
+                description = parse_html_data(json_v2_parsed['description'])
+                # ignore some bogus/placeholder descriptions (probably autogenerated)
+                if description.startswith('product_description_'):
+                    description = None
+            except AttributeError:
+                description = None
+            # process localizations
+            localizations = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([LOCALIZATION_SEPARATOR.join((localization['_embedded']['language']['code'],
+                                                                                                             localization['_embedded']['localizationScope']['type']))
+                                                                                for localization in json_v2_parsed['_embedded']['localizations']]))
+            if localizations == '': localizations = None
+
+            with db_lock:
+                # gp_int_v2_updated, gp_int_v2_json_payload,
+                # gp_int_v2_previous_json_diff, gp_v2_title, gp_v2_product_type, gp_v2_developer,
+                # gp_v2_publisher, gp_v2_size, gp_v2_is_preorder. gp_v2_in_development, gp_v2_is_installable,
+                # gp_v2_os_support_windows, gp_v2_os_support_linux, gp_v2_os_support_osx,
+                # gp_v2_supported_os_versions, gp_v2_global_release_date, gp_v2_gog_release_date,
+                # gp_v2_tags, gp_v2_properties, gp_v2_series, gp_v2_features,
+                # gp_v2_is_using_dosbox, gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
+                # gp_v2_description, gp_v2_localizations, gp_id (WHERE clause)
+                db_cursor.execute(UPDATE_ID_V2_QUERY, (datetime.now().isoformat(' '), json_v2_formatted,
+                                                       diff_v2_formatted, product_title, product_type, developer,
+                                                       publisher, size, is_preorder, in_development, is_installable,
+                                                       os_support_windows, os_support_linux, os_support_osx,
+                                                       supported_os_versions, global_release_date, gog_release_date,
+                                                       tags, properties, series, features,
+                                                       is_using_dosbox, links_store, links_support, links_forum,
+                                                       description, localizations, product_id))
+                db_connection.commit()
+
+            if existing_v2_json_formatted is not None:
+                logger.info(f'{process_tag}2Q ~~~ Updated the v2 data for {product_id}: {product_title}.')
+            else:
+                logger.info(f'{process_tag}2Q +++ Added v2 data for {product_id}: {product_title}.')
+
+    except:
+        logger.debug(f'{process_tag}2Q >>> Product v2 payload processing has failed for {product_id}.')
         # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
         raise
 
 def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, db_lock, session, db_connection):
-    # determine if a certain product id can query the v2 endpoint (movies and certain
-    # other ids will not get a valid v2 response, so querying it is useless)
-    if product_id in MOVIES_ID_LIST or product_id in NO_V2_ENDPOINT:
-        can_query_v2 = False
-    else:
-        can_query_v2 = True
-
-    # there's no need to query the 'description' for regular ids, since it will be contained in the v2 data
-    if can_query_v2:
-        # unused additional expand options: description, expanded_dlcs, related_products, screenshots, videos
-        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,changelog'
-    else:
-        # unused additional expand options: expanded_dlcs, related_products, screenshots, videos
-        product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,changelog'
-
     try:
+        # as a first step, determine if the id gets a proper response on the v2 endpoint, and, if not,
+        # fall back to the below products endpoint in order to parse as much information as possible
+        v2_query_response = gog_product_v2_query(process_tag, product_id, https_proxy, session)
+
+        # there's no need to query the 'description' for regular ids, since it will be contained in the v2 data
+        if v2_query_response is not None:
+            # unused additional expand options: description, expanded_dlcs, related_products, screenshots, videos
+            product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,changelog'
+        else:
+            # unused additional expand options: expanded_dlcs, related_products, screenshots, videos
+            product_url = f'https://api.gog.com/products/{product_id}?expand=downloads,description,changelog'
+
         # use an HTTPS proxy if configured to do so
         if https_proxy:
             response = session.get(product_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
@@ -370,13 +378,16 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                 # we can get garbage product titles from this endpoint, however in most cases these will be
                 # retrieved and parsed from the v2 metadata anyway; regardless, use this value for logging
                 product_title = product_title_log = json_parsed['title'].strip()
+                # ignore invalid product titles that start with 'product_title_'
+                if product_title.startswith('product_title_'):
+                    product_title = None
                 # process changelog
                 try:
                     changelog = parse_html_data(json_parsed['changelog'])
                 except AttributeError:
                     changelog = None
 
-                if can_query_v2:
+                if v2_query_response is not None:
                     product_title = None
                     product_type = None
                     gog_release_date = None
@@ -426,8 +437,8 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                     db_connection.commit()
                 logger.info(f'{process_tag}PQ +++ Added a new DB entry for {product_id}: {product_title_log}.')
 
-                if can_query_v2:
-                    gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session, db_connection)
+                if v2_query_response is not None:
+                    gog_product_v2_process_response(process_tag, product_id, v2_query_response, db_lock, db_connection)
 
             elif entry_count == 1:
                 # do not update existing entries in a full or builds scan, since update/delta scans will take care of that
@@ -435,8 +446,8 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                     logger.info(f'{process_tag}PQ >>> Found an existing db entry with id {product_id}. Skipping.')
                 # manual scans will be treated as update scans
                 else:
-                    db_cursor.execute('SELECT gp_int_delisted, gp_int_json_payload, gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
-                    existing_delisted, existing_json_formatted, product_title = db_cursor.fetchone()
+                    db_cursor.execute('SELECT gp_int_delisted, gp_int_json_payload, gp_int_v2_json_payload, gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
+                    existing_delisted, existing_json_formatted, existing_v2_json_formatted, product_title = db_cursor.fetchone()
 
                     # clear the delisted status if an id is relisted (should only happen rarely)
                     if existing_delisted is not None:
@@ -449,6 +460,13 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                     if existing_json_formatted != json_formatted:
                         logger.debug(f'{process_tag}PQ >>> Existing entry for {product_id} is outdated. Updating...')
 
+                        # some ids apparently no longer return v2 data, although we already have a v2 json entry
+                        # stored in the database for them; in such cases perform the updates as they would be done
+                        # for an id that returns a valid v2 json (only update the payload and changelog).
+                        missing_v2_payload = v2_query_response is None and existing_v2_json_formatted is not None
+                        if missing_v2_payload:
+                            logger.warning(f'{process_tag}PQ >>> Missing v2 payload for {product_id}: {product_title}.')
+
                         # calculate the diff between the new json and the previous one
                         # (applying the diff on the new json will revert to the previous version)
                         if existing_json_formatted is not None:
@@ -458,7 +476,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                             diff_formatted = None
 
                         with db_lock:
-                            if can_query_v2:
+                            if v2_query_response is not None or missing_v2_payload:
                                 # gp_int_updated, gp_int_json_payload,
                                 # gp_int_json_diff, gp_changelog, gp_id (WHERE clause)
                                 db_cursor.execute(UPDATE_ID_QUERY, (datetime.now().isoformat(' '), json_formatted,
@@ -467,6 +485,9 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                                 # for IDs that don't have a valid v2 API endpoint, we need to rely
                                 # on the title value in the current payload, as what we store can be NULL
                                 product_title = json_parsed['title'].strip()
+                                # ignore invalid product titles that start with 'product_title_'
+                                if product_title.startswith('product_title_'):
+                                    product_title = None
                                 # gp_int_updated, gp_int_json_payload,
                                 # gp_int_json_diff, gp_changelog, gp_v2_title, gp_v2_gog_release_date,
                                 # gp_v2_links_store, gp_v2_links_support, gp_v2_links_forum,
@@ -478,11 +499,11 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                             db_connection.commit()
                         logger.info(f'{process_tag}PQ ~~~ Updated the DB entry for {product_id}: {product_title}.')
 
-                    if can_query_v2:
-                        gog_product_v2_query(process_tag, product_id, https_proxy, db_lock, session, db_connection)
+                    if v2_query_response is not None:
+                        gog_product_v2_process_response(process_tag, product_id, v2_query_response, db_lock, db_connection)
 
         # existing ids return a 404 HTTP error code on removal
-        elif scan_mode == 'update' and response.status_code == 404:
+        elif scan_mode == 'update' and response.status_code == ConstantsInterface.HTTP_NOT_FOUND:
             db_cursor = db_connection.execute('SELECT gp_int_delisted, gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
             existing_delisted, product_title = db_cursor.fetchone()
 
@@ -499,11 +520,11 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                 logger.debug(f'{process_tag}PQ >>> Product with id {product_id} is already marked as delisted.')
 
         # unmapped ids will also return a 404 HTTP error code
-        elif response.status_code == 404:
+        elif response.status_code == ConstantsInterface.HTTP_NOT_FOUND:
             logger.debug(f'{process_tag}PQ >>> Product with id {product_id} returned an HTTP 404 error code. Skipping.')
 
         # at times ids may return a 500 HTTP error code (apparently caused by changelog corruption)
-        elif response.status_code == 500:
+        elif response.status_code == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
             # skip these ids after the usual retry cycle is attempted
             return (False, response.status_code)
 
@@ -579,22 +600,22 @@ def gog_product_games_catalog_query(parameters, scan_mode, https_proxy, db_lock,
                     logger.debug(f'GQ >>> Running scan for id {product_id}...')
                     retries_complete = False
                     retry_counter = 0
-    
+
                     while not retries_complete:
                         if retry_counter > 0:
                             logger.warning(f'GQ >>> Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                             sleep(RETRY_SLEEP_INTERVAL)
                             logger.warning(f'GQ >>> Reprocessing id {product_id}...')
-    
+
                         retries_complete, http_status = gog_product_extended_query('', product_id, scan_mode, https_proxy, db_lock,
                                                                                    session, db_connection)
-    
+
                         if not retries_complete:
                             retry_counter += 1
                             # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 # skip the id if the server returns HTTP 500
-                                if http_status == 500:
+                                if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                                     logger.warning(f'GQ >>> Skipping id {product_id} due to an HTTP 500 error code.')
                                     retries_complete = True
                                 else:
@@ -713,7 +734,7 @@ def gog_files_extract_parser(db_connection, product_id):
         except AttributeError:
             patch_version = None
         # replace blank patch version with None (blanks happens with patches, but not with installers)
-        if patch_version == '': 
+        if patch_version == '':
             patch_version = None
         patch_total_size = patch_entry['total_size']
 
@@ -858,7 +879,7 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, https_proxy, db_
     # generate a string of comma separated ids in the current batch
     product_ids_string = ','.join([str(product_id_value) for product_id_value in
                                    range(product_id, product_id + IDS_IN_BATCH) if product_id_value not in SKIP_IDS])
-    
+
     logger.debug(f'{process_tag}BQ >>> Processing the following product_id string batch: {product_ids_string}.')
 
     bulk_products_url = f'https://api.gog.com/products?ids={product_ids_string}'
@@ -898,7 +919,7 @@ def gog_products_bulk_query(process_tag, product_id, scan_mode, https_proxy, db_
                             logger.info(f'{process_tag}BQ >>> Succesfully retried for {current_product_id}.')
                     else:
                         # skip the id if the server returns HTTP 500
-                        if http_status == 500:
+                        if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                             logger.warning(f'BQ >>> Skipping id {current_product_id} due to an HTTP 500 error code.')
                             retries_complete = True
                         else:
@@ -1135,9 +1156,6 @@ if __name__ == "__main__":
         RETRY_COUNT = general_section.getint('retry_count')
         RETRY_SLEEP_INTERVAL = general_section.getint('retry_sleep_interval')
         INCREMENTAL_RETRY_BASE = general_section.getint('incremental_retry_base')
-        # ids that don't have a valid v2 endpoint for some reason
-        NO_V2_ENDPOINT = [int(product_id.strip()) for product_id in
-                          general_section.get('no_v2_endpoint').split(',') if product_id != '']
 
         # parsing proxy parameters
         proxy_section = configParser['PROXY']
@@ -1327,33 +1345,33 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
-    
+
                                 last_id_counter += 1
-    
+
                             else:
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     # skip the id if the server returns HTTP 500
-                                    if http_status == 500:
+                                    if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                                         logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
                                         retries_complete = True
                                     else:
@@ -1471,21 +1489,21 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
@@ -1494,7 +1512,7 @@ if __name__ == "__main__":
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     # skip the id if the server returns HTTP 500
-                                    if http_status == 500:
+                                    if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                                         logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
                                         retries_complete = True
                                     else:
@@ -1523,21 +1541,21 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
@@ -1546,7 +1564,7 @@ if __name__ == "__main__":
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     # skip the id if the server returns HTTP 500
-                                    if http_status == 500:
+                                    if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                                         logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
                                         retries_complete = True
                                     else:
@@ -1595,7 +1613,7 @@ if __name__ == "__main__":
         except ValueError:
             logger.critical('Could not parse id list!')
             raise SystemExit(5)
-        
+
         if len(id_list) == 0:
             logger.warning('Nothing to scan!')
             raise SystemExit(0)
@@ -1624,7 +1642,7 @@ if __name__ == "__main__":
                             # terminate the scan if the RETRY_COUNT limit is exceeded
                             if retry_counter > RETRY_COUNT:
                                 # skip the id if the server returns HTTP 500
-                                if http_status == 500:
+                                if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                                     logger.warning(f'Skipping id {product_id} due to an HTTP 500 error code.')
                                     retries_complete = True
                                 else:
@@ -1649,21 +1667,21 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_event.is_set():
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete, http_status = gog_product_extended_query('', current_product_id, scan_mode, HTTPS_PROXY, db_lock,
                                                                                        session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
@@ -1672,7 +1690,7 @@ if __name__ == "__main__":
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
                                 if retry_counter > RETRY_COUNT:
                                     # skip the id if the server returns HTTP 500
-                                    if http_status == 500:
+                                    if http_status == ConstantsInterface.HTTP_INTERNAL_SERVER_ERROR:
                                         logger.warning(f'Skipping id {current_product_id} due to an HTTP 500 error code.')
                                         retries_complete = True
                                     else:

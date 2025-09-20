@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.00
-@date: 14/06/2025
+@version: 5.10
+@date: 20/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -69,6 +69,9 @@ def gog_prices_query(product_id, country_code, currencies_list, https_proxy, ses
     prices_url = f'https://api.gog.com/products/{product_id}/prices?countryCode={country_code}'
 
     try:
+        # sometimes needed for exception logging
+        currency = None
+
         # use a HTTPS proxy if configured to do so
         if https_proxy:
             response = session.get(prices_url, headers=ConstantsInterface.HEADERS, cookies=ConstantsInterface.COOKIES,
@@ -92,7 +95,27 @@ def gog_prices_query(product_id, country_code, currencies_list, https_proxy, ses
 
                 db_cursor = db_connection.execute('SELECT gp_v2_title FROM gog_products WHERE gp_id = ?', (product_id,))
                 result = db_cursor.fetchone()
-                product_title = result[0]
+                product_title = result[0] if result is not None else None
+
+                if product_title is None:
+                    logger.warning(f'PQ >>> Found pricing info for an unknown id: {product_id}')
+                else:
+                    # update the product title for the current id if necessary
+                    db_cursor = db_connection.execute('SELECT DISTINCT gpr_int_title FROM gog_prices WHERE gpr_int_id = ?',
+                                                       (product_id,))
+                    result = db_cursor.fetchall()
+
+                    # scan all the existing product titles to detect any missmatches
+                    for existing_product_title_result in result:
+                        existing_product_title = existing_product_title_result[0]
+
+                        if existing_product_title != product_title:
+                            db_cursor.execute('UPDATE gog_prices SET gpr_int_title = ? WHERE gpr_int_id = ?',
+                                              (product_title, product_id))
+                            db_connection.commit()
+                            logger.info(f'PQ ~~~ Succesfully updated product title for {product_id}: {product_title}.')
+                            # one update statement is enough to fix all potential discrepancies
+                            break
 
                 for json_item in items:
                     currency = json_item['currency']['code']
@@ -315,27 +338,27 @@ if __name__ == "__main__":
 
                 for id_entry in id_list:
                     current_product_id = id_entry[0]
-                    
+
                     if current_product_id not in SKIP_IDS:
                         logger.debug(f'Now processing id {current_product_id}...')
                         retries_complete = False
                         retry_counter = 0
-    
+
                         while not retries_complete and not terminate_signal:
                             if retry_counter > 0:
                                 logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
                                 sleep(RETRY_SLEEP_INTERVAL)
                                 logger.warning(f'Reprocessing id {current_product_id}...')
-    
+
                             retries_complete = gog_prices_query(current_product_id, COUNTRY_CODE, CURRENCIES_LIST,
                                                                 HTTPS_PROXY, session, db_connection)
-    
+
                             if retries_complete:
                                 if retry_counter > 0:
                                     logger.info(f'Succesfully retried for {current_product_id}.')
-    
+
                                 last_id_counter += 1
-    
+
                             else:
                                 retry_counter += 1
                                 # terminate the scan if the RETRY_COUNT limit is exceeded
