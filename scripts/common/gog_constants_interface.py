@@ -1,7 +1,7 @@
 '''
 @author: Winter Snowfall
-@version: 5.00
-@date: 14/06/2025
+@version: 5.10
+@date: 20/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -16,6 +16,8 @@ class ConstantsInterface:
     # (helps preserve process start order for logging purposes)
     PROCESS_START_WAIT_INTERVAL = 0.05 #seconds
     HTTP_OK = 200
+    HTTP_NOT_FOUND = 404
+    HTTP_INTERNAL_SERVER_ERROR = 500
     # list of HTTP error codes that will trigger a proxy restart
     # HTTP 425/429/509 errors will be returned in case of throttling
     PROXY_RESTART_HTTP_CODES = (425, 429, 509)
