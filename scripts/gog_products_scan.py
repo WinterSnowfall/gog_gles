@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.10
-@date: 20/09/2025
+@version: 5.11
+@date: 30/09/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -980,6 +980,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                 product_id = id_queue.get(True, ConstantsInterface.QUEUE_WAIT_TIMEOUT)
 
                 retry_counter = 0
+                retry_counter_validation = True
                 proxy_retry_counter = 0
                 retries_complete = False
                 proxy_restart = False
@@ -990,8 +991,11 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
 
                         if https_proxy:
                             if not proxy_event.is_set():
-                                #reset HTTP session
+                                # reset HTTP session
                                 processSession = requests.Session()
+                                # prevent the retry counter on idle scan threads from
+                                # triggering a scan abort during a proxy restart
+                                retry_counter_validation = False
                                 logger.debug(f'{process_tag}>>> Waiting for HTTPS proxy event...')
                             else:
                                 # non-incremental sleep, in case of unexpected HTTP errors
@@ -1070,7 +1074,7 @@ def worker_process(process_tag, scan_mode, id_queue, db_lock, config_lock,
                         else:
                             retry_counter += 1
                             # terminate the scan if the RETRY_COUNT limit is exceeded
-                            if retry_counter > RETRY_COUNT:
+                            if retry_counter_validation and retry_counter > RETRY_COUNT:
                                 logger.critical(f'{process_tag}>>> Request most likely blocked/invalidated by GOG. Terminating process!')
                                 fail_event.set()
                                 terminate_event.set()
