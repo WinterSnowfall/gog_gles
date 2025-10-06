@@ -22,14 +22,15 @@ cd scripts
 
 if [ $DAYOFWEEK = $WEEKLYSCANDAY ]
 then
+    ./gog_products_scan.py -c
+    ./gog_products_scan.py -r
+    ./gog_products_scan.py -d
+
     ./gog_builds_scan.py -r
 
     ./gog_releases_scan.py -u
     ./gog_releases_scan.py -p
     ./gog_releases_scan.py -r
-
-    ./gog_products_scan.py -r
-    ./gog_products_scan.py -d
 
     # can be moved outside of the weekly scan block
     # if more regular pricing updates are preferred

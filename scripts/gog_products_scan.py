@@ -561,8 +561,8 @@ def gog_product_games_catalog_query(parameters, scan_mode, https_proxy, db_lock,
 
     logger.debug(f'GQ >>> Querying url: {catalog_url}.')
 
-    # return a value of 0, should something go terribly wrong
-    pages = 0
+    pages = None
+    last_product_id = None
 
     try:
         # use an HTTPS proxy if configured to do so
@@ -586,14 +586,18 @@ def gog_product_games_catalog_query(parameters, scan_mode, https_proxy, db_lock,
 
             # use a set to avoid processing potentially duplicate ids
             id_set = set()
+            id_value = None
 
             for product_element in gogData_json['products']:
                 id_value = product_element['id']
                 logger.debug(f'GQ >>> Found the following id: {id_value}.')
                 id_set.add(id_value)
 
+            last_product_id = id_value
+            logger.debug(f'GQ >>> Last product id is: {last_product_id}.')
             # sort the set into an ordered list
             id_list = sorted(id_set)
+            logger.debug(f'GQ >>> Found a total of {len(id_list)} ids.')
 
             for product_id in id_list:
                 if product_id not in SKIP_IDS:
@@ -628,28 +632,33 @@ def gog_product_games_catalog_query(parameters, scan_mode, https_proxy, db_lock,
             logger.warning(f'GQ >>> HTTP error code {response.status_code} received.')
             raise Exception()
 
-        return (True, pages)
+        # 'new' scans expect a new number of pages to iterate
+        if scan_mode == 'new':
+            return (True, pages)
+        # full 'catalog' scans expect the last product id in the response to iterate
+        else:
+            return (True, last_product_id)
 
     # sometimes the connection may time out
     except requests.Timeout:
         logger.warning(f'GQ >>> HTTP request timed out after {HTTP_TIMEOUT} seconds for {product_id}.')
-        return (False, 0)
+        return (False, None)
 
     # sometimes the HTTPS connection encounters SSL errors
     except requests.exceptions.SSLError:
         logger.warning(f'GQ >>> Connection SSL error encountered for {product_id}.')
-        return (False, 0)
+        return (False, None)
 
     # sometimes the HTTPS connection gets rejected/terminated
     except requests.exceptions.ConnectionError:
         logger.warning(f'GQ >>> Connection error encountered for {product_id}.')
-        return (False, 0)
+        return (False, None)
 
     except:
         logger.debug('GQ >>> Processing has failed!')
         # uncomment for debugging purposes only
         #logger.error(traceback.format_exc())
-        return (False, 0)
+        return (False, None)
 
 def gog_files_extract_parser(db_connection, product_id):
 
@@ -1120,6 +1129,7 @@ if __name__ == "__main__":
     group.add_argument('-f', '--full', help='Perform a full products scan using the Galaxy products endpoint', action='store_true')
     group.add_argument('-u', '--update', help='Run an update scan for existing products', action='store_true')
     group.add_argument('-n', '--new', help='Query new products', action='store_true')
+    group.add_argument('-c', '--catalog', help='Query catalog products', action='store_true')
     group.add_argument('-b', '--builds', help='Perform a product scan based on unknown builds', action='store_true')
     group.add_argument('-r', '--releases', help='Perform a product scan based on missing external releases', action='store_true')
     group.add_argument('-e', '--extract', help='Extract file data from existing products', action='store_true')
@@ -1198,6 +1208,8 @@ if __name__ == "__main__":
             scan_mode = 'update'
         elif args.new:
             scan_mode = 'new'
+        elif args.catalog:
+            scan_mode = 'catalog'
         elif args.builds:
             scan_mode = 'builds'
         elif args.releases:
@@ -1430,6 +1442,11 @@ if __name__ == "__main__":
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for page {page_no}.')
 
+                            if new_page_count is None:
+                                logger.critical('Invalid page count received, terminating scan!')
+                                fail_event.set()
+                                terminate_event.set()
+
                             page_no += 1
 
                         else:
@@ -1465,6 +1482,11 @@ if __name__ == "__main__":
                             if retry_counter > 0:
                                 logger.info(f'Succesfully retried for page {page_no}.')
 
+                            if upcoming_page_count is None:
+                                logger.critical('Invalid page count received, terminating scan!')
+                                fail_event.set()
+                                terminate_event.set()
+
                             page_no += 1
 
                         else:
@@ -1480,6 +1502,72 @@ if __name__ == "__main__":
         except SystemExit:
             terminate_event.set()
             logger.info('Stopping new scan...')
+
+    elif scan_mode == 'catalog':
+        logger.info('--- Running in CATALOG scan mode ---')
+
+        catalog_scan_section = configParser['CATALOG_SCAN']
+
+        try:
+            searchAfter = catalog_scan_section.getint('last_id')
+        except ValueError:
+            searchAfter = 0
+
+        ID_SAVE_FREQUENCY = catalog_scan_section.getint('id_save_frequency')
+
+        if searchAfter > 0:
+            logger.info(f'Restarting update scan from id: {searchAfter}.')
+
+        try:
+            with requests.Session() as session, sqlite3.connect(DB_FILE_PATH) as db_connection:
+                newSearchAfter = 0
+                last_id_counter = 0
+
+                while searchAfter is not None and not terminate_event.is_set():
+                    retries_complete = False
+                    retry_counter = 0
+
+                    while not retries_complete and not terminate_event.is_set():
+                        if retry_counter > 0:
+                            logger.warning(f'Retry number {retry_counter}. Sleeping for {RETRY_SLEEP_INTERVAL}s...')
+                            sleep(RETRY_SLEEP_INTERVAL)
+                            logger.warning(f'Reprocessing catalog entries from id {searchAfter}...')
+
+                        catalog_params = f'limit=48&order=asc:externalProductId&searchAfter={searchAfter}'
+                        retries_complete, newSearchAfter = gog_product_games_catalog_query(catalog_params, scan_mode, HTTPS_PROXY, db_lock,
+                                                                                           session, db_connection)
+
+                        if retries_complete:
+                            if retry_counter > 0:
+                                logger.info(f'Succesfully retried for id {searchAfter}.')
+
+                            searchAfter = newSearchAfter
+                            # the GOG (website) game catalog paginates at 48 ids per page
+                            last_id_counter += 48
+
+                            if searchAfter is not None:
+                                if last_id_counter % ID_SAVE_FREQUENCY == 0 and not terminate_event.is_set():
+                                    configParser.read(CONF_FILE_PATH)
+                                    configParser['CATALOG_SCAN']['last_id'] = str(searchAfter)
+
+                                    with open(CONF_FILE_PATH, 'w') as file:
+                                        configParser.write(file)
+
+                                    logger.info(f'Saved scan up to last_id of {searchAfter}.')
+
+                        else:
+                            retry_counter += 1
+                            # terminate the scan if the RETRY_COUNT limit is exceeded
+                            if retry_counter > RETRY_COUNT:
+                                logger.critical('Retry count exceeded, terminating scan!')
+                                fail_event.set()
+                                terminate_event.set()
+
+                db_connection.execute(ConstantsInterface.OPTIMIZE_QUERY)
+
+        except SystemExit:
+            terminate_event.set()
+            logger.info('Stopping catalog scan...')
 
     elif scan_mode == 'builds':
         logger.info('--- Running in BUILDS scan mode ---')
@@ -1717,6 +1805,14 @@ if __name__ == "__main__":
         logger.info('Resetting last_id parameter...')
         configParser.read(CONF_FILE_PATH)
         configParser['UPDATE_SCAN']['last_id'] = ''
+
+        with open(CONF_FILE_PATH, 'w') as file:
+            configParser.write(file)
+
+    elif not terminate_event.is_set() and scan_mode == 'catalog':
+        logger.info('Resetting last_id parameter...')
+        configParser.read(CONF_FILE_PATH)
+        configParser['CATALOG_SCAN']['last_id'] = ''
 
         with open(CONF_FILE_PATH, 'w') as file:
             configParser.write(file)
