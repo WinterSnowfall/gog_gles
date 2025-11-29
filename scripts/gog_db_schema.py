@@ -151,12 +151,6 @@ CREATE_GOG_RELEASES_QUERY = ('CREATE TABLE gog_releases (gr_int_nr INTEGER PRIMA
                              'gr_visible_in_library INTEGER NOT NULL, '
                              'gr_aggregated_rating REAL)')
 
-CREATE_GOG_SUPPORT_QUERY = ('CREATE TABLE gog_support (gs_int_nr INTEGER PRIMARY KEY, '
-                            'gs_int_added TEXT NOT NULL, '
-                            'gs_int_removed TEXT, '
-                            'gs_name TEXT NOT NULL, '
-                            'gs_link TEXT UNIQUE NOT NULL)')
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=('GOG DB schema (part of gog_gles) - a script to create the sqlite DB structure '
                                                   'for the other gog_gles utilities and maintain it.'))
@@ -199,7 +193,6 @@ if __name__ == "__main__":
                 db_cursor.execute(CREATE_GOG_PRODUCTS_QUERY)
                 db_cursor.execute(CREATE_GOG_RATINGS_QUERY)
                 db_cursor.execute(CREATE_GOG_RELEASES_QUERY)
-                db_cursor.execute(CREATE_GOG_SUPPORT_QUERY)
                 db_connection.commit()
 
             logger.info('DB created successfully.')

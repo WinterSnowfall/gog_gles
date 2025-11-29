@@ -20,10 +20,6 @@ cd scripts
 
 if [ $DAYOFWEEK = $WEEKLYSCANDAY ]
 then
-    # can be moved outside of the weekly scan block
-    # if more regular support page updates are preferred
-    ./gog_support_scan.py
-
     ./gog_products_scan.py -c
     ./gog_products_scan.py -r
     ./gog_products_scan.py -d

@@ -3,13 +3,13 @@ A collection of scripts that call publicly available GOG APIs in order to keep t
 
 ## What does gog_gles do?
 
-It provides several python3 scripts which call publicly available GOG APIs in order to collect product data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to game cards, changelogs, installers/files, Galaxy builds, ratings and prices.
+It provides several python3 scripts which call publicly available GOG APIs in order to collect product data and store it in an SQLite database, which can then be queried in order to detect updates and other changes to game cards, changelogs, installers/files, Galaxy builds, ratings, prices and forum pages.
 
 ## What do I need to do to get it running on my PC?
 
 **1.** You will need a **python3.6+** environment. Most Linux distros will come with python3 installed - make sure you pick one which comes with **python 3.6** or above.
 
-**2.** The following python3 packages need to be installed: `html2text, requests, brotli, lxml, matplotlib, tk, cloudscraper`
+**2.** The following python3 packages need to be installed: `html2text, requests, brotli, lxml, matplotlib, tk`
 
 On Linux, you will need to install the packages using the distro's default package manager. For Debian-based/derived distros, this should do the trick:
 ```
@@ -70,15 +70,15 @@ python3 gog_ratings_scan.py -u
 python3 gog_releases_scan.py -p
 ```
 
-**12.** Populate initial support page data:
+**12.** Populate initial forum pages data:
 
 ```
-python3 gog_support_scan.py
+python3 gog_forums_scan.py
 ```
 
 You're now good to go!
 
-All database tables should be populated with data. This is essentially a snapshot of all the game ids, associated installer/file entries, ratings, releases, support pages and (optionally) prices reported by the GOG APIs.
+All database tables should be populated with data. This is essentially a snapshot of all the game ids, associated installer/file entries, ratings, releases, forum pages and (optionally) prices reported by the GOG APIs.
 
 ## How do I handle update scans?
 
