@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.11
-@date: 30/09/2025
+@version: 5.12
+@date: 29/11/2025
 
 Warning: Built for use with python 3.6+
 '''
@@ -824,9 +824,11 @@ if __name__ == "__main__":
                         current_latest_build_version = current_latest_build_version.replace('(A)', '')
                         current_latest_file_version = current_latest_file_version.replace('(A)', '')
 
-                        # remove any 'GALAXY HOTFIX' and 'GOG HOTFIX' strings from build versions
+                        # remove any 'GALAXY HOTFIX' and 'GOG HOTFIX' strings from builds/installers
                         current_latest_build_version = current_latest_build_version.replace('GALAXY HOTFIX', '')
+                        current_latest_file_version = current_latest_file_version.replace('GALAXY HOTFIX', '')
                         current_latest_build_version = current_latest_build_version.replace('GOG HOTFIX', '')
+                        current_latest_file_version = current_latest_file_version.replace('GOG HOTFIX', '')
 
                         # remove punctuation/formatting/grouping characters
                         current_latest_build_version = current_latest_build_version.translate(STRIP_OUT_DICT)
