@@ -13,7 +13,7 @@ It provides several python3 scripts which call publicly available GOG APIs in or
 
 On Linux, you will need to install the packages using the distro's default package manager. For Debian-based/derived distros, this should do the trick:
 ```
-sudo apt-get install python3-html2text python3-requests python3-brotli python3-lxml python3-matplotlib python3-tk python3-cloudscraper
+sudo apt-get install python3-html2text python3-requests python3-brotli python3-lxml python3-matplotlib python3-tk
 ```
 
 **3.** Switch to the scripts directory:

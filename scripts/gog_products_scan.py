@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.11
-@date: 30/09/2025
+@version: 5.13
+@date: 13/04/2026
 
 Warning: Built for use with python 3.6+
 '''
@@ -216,8 +216,14 @@ def gog_product_v2_process_response(process_tag, product_id, response, db_lock, 
             # process product type
             product_type = json_v2_parsed['_embedded']['productType']
             # process developer/publisher
-            developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
-            publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
+            try:
+                developer = json_v2_parsed['_embedded']['developers'][0]['name'].strip()
+            except (KeyError, IndexError):
+                developer = None
+            try:
+                publisher = json_v2_parsed['_embedded']['publisher']['name'].strip()
+            except KeyError:
+                publisher = None
             # process size (MB value)
             size = json_v2_parsed['size']
             # process preorder status
