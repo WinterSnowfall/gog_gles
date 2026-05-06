@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.13
-@date: 13/04/2026
+@version: 5.14
+@date: 02/05/2026
 
 Warning: Built for use with python 3.6+
 '''
@@ -291,6 +291,7 @@ def gog_product_v2_process_response(process_tag, product_id, response, db_lock, 
                 links_store = None
             links_support = json_v2_parsed['_links']['support']['href']
             links_forum = json_v2_parsed['_links']['forum']['href']
+            if links_forum == '': links_forum = None
             # process description
             try:
                 description = parse_html_data(json_v2_parsed['description'])
@@ -414,6 +415,7 @@ def gog_product_extended_query(process_tag, product_id, scan_mode, https_proxy, 
                     links_support = json_parsed['links']['support']
                     # the value stored here is identical to forum in the v2 API payload
                     links_forum = json_parsed['links']['forum']
+                    if links_forum == '': links_forum = None
                     # the value stored here is mostly identical to Description in the v2 API payload
                     try:
                         description = parse_html_data(json_parsed['description']['full'])
