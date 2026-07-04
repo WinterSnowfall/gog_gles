@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.14
-@date: 02/05/2026
+@version: 5.15
+@date: 03/07/2026
 
 Warning: Built for use with python 3.6+
 '''
@@ -258,11 +258,14 @@ def gog_product_v2_process_response(process_tag, product_id, response, db_lock, 
             except KeyError:
                 global_release_date = None
             # process GOG release date
-            gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate']
-            if gog_release_date is not None:
-                # ISO 8601 allows omitting the T delimiter in the extended format
-                # and sqlite datetime functions use RFC 3339, which omits it by default
-                gog_release_date = gog_release_date.replace('T', ' ')
+            try:
+                gog_release_date = json_v2_parsed['_embedded']['product']['gogReleaseDate']
+                if gog_release_date is not None:
+                    # ISO 8601 allows omitting the T delimiter in the extended format
+                    # and sqlite datetime functions use RFC 3339, which omits it by default
+                    gog_release_date = gog_release_date.replace('T', ' ')
+            except KeyError:
+                gog_release_date = None
             # process tags
             tags = ConstantsInterface.MVF_VALUE_SEPARATOR.join(sorted([tag['name'] for tag in json_v2_parsed['_embedded']['tags']]))
             if tags == '': tags = None
