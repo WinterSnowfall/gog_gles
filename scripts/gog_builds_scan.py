@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.12
-@date: 29/11/2025
+@version: 5.17
+@date: 19/07/2026
 
 Warning: Built for use with python 3.6+
 '''
@@ -15,6 +15,7 @@ import signal
 import requests
 import logging
 import argparse
+import platform
 import difflib
 import re
 import os
@@ -437,6 +438,9 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, sigterm_handler)
     # catch SIGINT and exit gracefully
     signal.signal(signal.SIGINT, sigint_handler)
+
+    if platform.system() == 'Linux':
+        multiprocessing.set_start_method('fork')
 
     parser = argparse.ArgumentParser(description=('GOG builds scan (part of gog_gles) - a script to call publicly available GOG APIs '
                                                   'in order to retrieve builds information and updates.'))
