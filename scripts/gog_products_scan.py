@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
 @author: Winter Snowfall
-@version: 5.15
-@date: 03/07/2026
+@version: 5.16
+@date: 19/07/2026
 
 Warning: Built for use with python 3.6+
 '''
@@ -730,7 +730,12 @@ def gog_files_extract_parser(db_connection, product_id):
 
             else:
                 logger.debug(f'FQ >>> Found an existing entry for {product_id}: {installer_product_name}, {installer_id}, {installer_version}.')
-                listed_installer_pks.remove(entry_pk[0])
+                # in case of an improbable, but apparently not impossible, chance of a duplicate entry,
+                # the second entry would error out, since it would have been removed while processing the first
+                try:
+                    listed_installer_pks.remove(entry_pk[0])
+                except ValueError:
+                    pass
 
     if len(listed_installer_pks) > 0:
         for removed_pk in listed_installer_pks:
@@ -785,7 +790,12 @@ def gog_files_extract_parser(db_connection, product_id):
 
             else:
                 logger.debug(f'FQ >>> Found an existing entry for {product_id}: {patch_product_name}, {patch_id}, {patch_version}.')
-                listed_patch_pks.remove(entry_pk[0])
+                # in case of an improbable, but apparently not impossible, chance of a duplicate entry,
+                # the second entry would error out, since it would have been removed while processing the first
+                try:
+                    listed_patch_pks.remove(entry_pk[0])
+                except ValueError:
+                    pass
 
     if len(listed_patch_pks) > 0:
         for removed_pk in listed_patch_pks:
@@ -839,7 +849,12 @@ def gog_files_extract_parser(db_connection, product_id):
 
             else:
                 logger.debug(f'FQ >>> Found an existing entry for {product_id}: {language_pack_product_name}, {language_pack_id}, {language_pack_version}.')
-                listed_language_packs_pks.remove(entry_pk[0])
+                # in case of an improbable, but apparently not impossible, chance of a duplicate entry,
+                # the second entry would error out, since it would have been removed while processing the first
+                try:
+                    listed_language_packs_pks.remove(entry_pk[0])
+                except ValueError:
+                    pass
 
     if len(listed_language_packs_pks) > 0:
         for removed_pk in listed_language_packs_pks:
@@ -884,7 +899,12 @@ def gog_files_extract_parser(db_connection, product_id):
 
             else:
                 logger.debug(f'FQ >>> Found an existing entry for {product_id}: {bonus_content_product_name}, {bonus_content_id}, {bonus_content_type}.')
-                listed_bonus_content_pks.remove(entry_pk[0])
+                # in case of an improbable, but apparently not impossible, chance of a duplicate entry,
+                # the second entry would error out, since it would have been removed while processing the first
+                try:
+                    listed_bonus_content_pks.remove(entry_pk[0])
+                except ValueError:
+                    pass
 
     if len(listed_bonus_content_pks) > 0:
         for removed_pk in listed_bonus_content_pks:
